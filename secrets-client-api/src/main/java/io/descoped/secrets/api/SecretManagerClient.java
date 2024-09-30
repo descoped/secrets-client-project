@@ -1,4 +1,4 @@
-package no.ssb.dapla.secrets.api;
+package io.descoped.secrets.api;
 
 import io.descoped.service.provider.api.ProviderConfigurator;
 
