@@ -1,4 +1,4 @@
-module dapla.secrets.client.api {
+module secrets.client.api {
 
     requires io.descoped.service.provider.api;
 
