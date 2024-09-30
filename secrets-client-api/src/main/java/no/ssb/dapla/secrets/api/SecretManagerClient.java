@@ -1,6 +1,6 @@
 package no.ssb.dapla.secrets.api;
 
-import no.ssb.service.provider.api.ProviderConfigurator;
+import io.descoped.service.provider.api.ProviderConfigurator;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
