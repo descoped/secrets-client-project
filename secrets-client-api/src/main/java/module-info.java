@@ -1,4 +1,4 @@
-module secrets.client.api {
+module io.descoped.secrets.client.api {
 
     requires io.descoped.service.provider.api;
 
