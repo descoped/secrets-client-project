@@ -27,3 +27,11 @@ Files written by 2.x `addVersion` went through `java.util.Properties.store(Outpu
 character outside ISO-8859-1 (for example `https\://host`, `blå`). 3.0 reads values verbatim (see
 [the file format](providers/safe-configuration.md#file-format)), so undo every one of these escapes once, in every line
 of such a file.
+
+## Migrating from `no.ssb.dapla.secrets`
+
+Before 2.0, this library was published with the Maven group `no.ssb.dapla.secrets` (artifacts
+`dapla-secrets-client-api` and `dapla-secrets-provider-*`, versions 0.x, packages `no.ssb.dapla.secrets.*`). Since 2.0
+it is `io.descoped.secrets`. To upgrade from 0.x, change the group, the artifact names (drop the `dapla-` prefix) and
+the packages to `io.descoped.secrets`, then apply the 2.x → 3.0 changes above. The history of those versions is kept
+in this repository.
