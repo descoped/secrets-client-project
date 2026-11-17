@@ -48,7 +48,7 @@ Operation | Permission | Predefined role
 ---|---|---
 `readBytes`, `readChars`, `readString` | `secretmanager.versions.access` | `roles/secretmanager.secretAccessor`
 `addVersion` on an existing secret | `secretmanager.versions.add` | `roles/secretmanager.secretVersionAdder`
-`addVersion` on a new secret (creates it) | `secretmanager.secrets.create` | `roles/secretmanager.admin`
+`addVersion` on a new secret (creates it, then adds the version) | `secretmanager.secrets.create` and `secretmanager.versions.add` | `roles/secretmanager.admin`
 
 A missing permission is a `SecretManagerException` naming `PERMISSION_DENIED`.
 

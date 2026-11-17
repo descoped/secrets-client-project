@@ -31,8 +31,9 @@ import java.util.regex.Pattern;
  *     <tr><td>{@code secrets.provider}</td><td>{@code google-secret-manager}</td></tr>
  *     <tr><td>{@value #PROJECT_KEY}</td><td>the Google Cloud project id or number (required)</td></tr>
  *     <tr><td>{@value #KEY_PATH_KEY}</td><td>a service-account JSON key file; without it, Application Default
- *     Credentials are used (Workload Identity, the metadata server, {@code GOOGLE_APPLICATION_CREDENTIALS},
- *     {@code gcloud auth application-default login}). Do not use key files on a cluster.</td></tr>
+ *     Credentials are used, looked up in this order: {@code GOOGLE_APPLICATION_CREDENTIALS},
+ *     {@code gcloud auth application-default login}, the metadata server (Workload Identity on GKE, the attached
+ *     service account on Cloud Run and Compute Engine). Do not use key files on a cluster.</td></tr>
  *     <tr><td>{@value #REPLICATION_KEY}</td><td>comma-separated locations, such as {@code europe-north1}, for secrets
  *     that {@code addVersion} creates (user-managed replication); automatic replication when absent</td></tr>
  *     <tr><td>{@value #ENDPOINT_KEY}</td><td>the API endpoint, default {@value #DEFAULT_ENDPOINT}; another host

@@ -33,21 +33,28 @@ Provider name | Module
 
 Because the provider is chosen by configuration, the application code stays the same in every environment: a local
 file on a laptop, Google Secret Manager in production. Build the map from whatever configuration the application
-already has, for example environment variables:
+already has. For example from environment variables, naming each key explicitly (the keys contain `-` and `.`, so
+no mechanical renaming of `SECRETS_PROJECT_ID` gives `secrets.project-id`):
 
 ```java
-Map<String, String> configuration = System.getenv().entrySet().stream()
-        .filter(e -> e.getKey().startsWith("SECRETS_"))
-        .collect(Collectors.toMap(
-                e -> e.getKey().toLowerCase(Locale.ROOT).replace('_', '.'),  // SECRETS_PROVIDER -> secrets.provider
-                Map.Entry::getValue));
+Map<String, String> keys = Map.of(
+        "SECRETS_PROVIDER", "secrets.provider",
+        "SECRETS_PROJECT_ID", "secrets.project-id",
+        "SECRETS_PROPERTY_RESOURCE_PATH", "secrets.property-resource-path");
+Map<String, String> configuration = new HashMap<>();
+keys.forEach((variable, key) -> {
+    String value = System.getenv(variable);
+    if (value != null) {
+        configuration.put(key, value);
+    }
+});
 ```
 
 `create` throws:
 
 Exception | When
 ---|---
-`IllegalArgumentException` | `secrets.provider` is missing or blank, or a key the provider requires is missing
+`IllegalArgumentException` | `secrets.provider` is missing or blank, a key the provider requires is missing, or a value is invalid (for example a malformed project id, an endpoint that is not https, a timeout that is not positive, or no source at all for dynamic-configuration)
 `io.descoped.service.provider.api.ProviderException` | no provider, or more than one, has that name
 `SecretManagerException` | the provider cannot start (for example its file cannot be read)
 `NullPointerException` | the map, or a key or value in it, is `null`
@@ -91,7 +98,8 @@ A `null` name or value | `NullPointerException`
 
 - Exception messages name the secret, never its value, and neither do `toString()` or the cause chain.
 - `readBytes` and `readChars` return a new array that the caller owns. The client keeps no reference to it, nor to an
-  array passed to `addVersion`, so the caller can and should wipe both when done (`Arrays.fill(array, 0)`).
+  array passed to `addVersion`, so the caller can and should wipe both when done: `Arrays.fill(bytes, (byte) 0)`,
+  `Arrays.fill(chars, '\0')`.
 - `close()` is idempotent and wipes what the client holds in memory.
 - Clients are thread-safe.
 
