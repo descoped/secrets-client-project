@@ -73,8 +73,11 @@ jobs:
       # Every change merged to master is published as a SNAPSHOT to the Central Portal snapshot repository
       # (https://central.sonatype.com/repository/maven-snapshots/). Releases are never published from CI.
       # The token goes in through .github/maven-settings.xml, which binds it to central.sonatype.com (Maven 3.10).
+      # OFF until the 3.0.0 plan is complete (owner's decision, 2026-11-17): nothing is published to Maven
+      # Central before then, not even a SNAPSHOT. To turn it on, restore the condition
+      # `github.event_name == 'push' && github.ref == 'refs/heads/master'`.
       - name: Publish SNAPSHOT
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: false
         env:
           CENTRAL_TOKEN_USER: ${{ secrets.CENTRAL_TOKEN_USER }}
           CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
