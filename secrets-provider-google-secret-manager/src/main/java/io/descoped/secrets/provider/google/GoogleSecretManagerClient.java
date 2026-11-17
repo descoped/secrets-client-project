@@ -249,7 +249,9 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
             });
         } catch (JacksonException | NumberFormatException e) {
             wipe(payload.data);
-            throw new SecretManagerException("Cannot parse the response for secret '" + secretName + "'", e);
+            // Not chained: the parser's message can quote the token it stopped at, which may be part of the value.
+            throw new SecretManagerException("Cannot parse the response for secret '" + secretName + "' ("
+                    + e.getClass().getSimpleName() + ")");
         }
         if (payload.data == null) {
             throw malformed(secretName);
