@@ -1,11 +1,14 @@
 import io.descoped.secrets.api.SecretManagerClientInitializer;
 
+/**
+ * The dynamic-configuration secrets provider. For tests and migration only.
+ */
 module io.descoped.secrets.provider.dynamic.configuration {
 
     requires io.descoped.service.provider.api;
     requires io.descoped.dynamic.config;
 
-    requires io.descoped.secrets.client.api;
+    requires transitive io.descoped.secrets.client.api;
 
     requires org.slf4j;
 

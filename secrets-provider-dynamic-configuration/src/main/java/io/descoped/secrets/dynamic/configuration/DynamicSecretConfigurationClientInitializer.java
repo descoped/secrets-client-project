@@ -8,8 +8,17 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * The provider {@code dynamic-secret-configuration}.
+ */
 @ProviderName("dynamic-secret-configuration")
 public class DynamicSecretConfigurationClientInitializer implements SecretManagerClientInitializer {
+
+    /**
+     * Creates the initializer; called by {@link java.util.ServiceLoader}.
+     */
+    public DynamicSecretConfigurationClientInitializer() {
+    }
 
     @Override
     public String providerId() {

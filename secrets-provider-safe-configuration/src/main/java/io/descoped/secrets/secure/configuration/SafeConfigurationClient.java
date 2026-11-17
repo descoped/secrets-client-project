@@ -20,6 +20,10 @@ import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * A client that reads secrets from a local {@code key=value} file and keeps the values as byte arrays,
+ * wiped on {@link #close()}.
+ */
 public class SafeConfigurationClient implements SecretManagerClient {
 
     static final Logger LOG = LoggerFactory.getLogger(SafeConfigurationClient.class);
@@ -28,6 +32,11 @@ public class SafeConfigurationClient implements SecretManagerClient {
     private final Object lock = new Object();
     private final AtomicBoolean closed = new AtomicBoolean();
 
+    /**
+     * Reads the secrets from a file.
+     *
+     * @param propertyResourcePath the path of the secrets file
+     */
     public SafeConfigurationClient(String propertyResourcePath) {
         Objects.requireNonNull(propertyResourcePath);
         resourcePath = Paths.get(propertyResourcePath);

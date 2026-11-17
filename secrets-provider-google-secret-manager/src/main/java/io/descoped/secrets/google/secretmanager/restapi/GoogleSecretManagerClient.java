@@ -22,6 +22,9 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * A client for Google Secret Manager, through its REST API.
+ */
 public class GoogleSecretManagerClient implements SecretManagerClient {
 
     static final ObjectMapper mapper = new ObjectMapper();
@@ -31,6 +34,11 @@ public class GoogleSecretManagerClient implements SecretManagerClient {
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     // uses compute-engine
+    /**
+     * Authenticates with the Compute Engine credentials of the environment.
+     *
+     * @param projectId the Google Cloud project
+     */
     public GoogleSecretManagerClient(String projectId) {
         this.projectId = projectId;
         GoogleCredentials credentials = ComputeEngineCredentials.create();
@@ -39,6 +47,12 @@ public class GoogleSecretManagerClient implements SecretManagerClient {
     }
 
     // uses service-account
+    /**
+     * Authenticates with a service-account key file.
+     *
+     * @param projectId             the Google Cloud project
+     * @param serviceAccountKeyPath the service-account JSON key file
+     */
     public GoogleSecretManagerClient(String projectId, String serviceAccountKeyPath) {
         this.projectId = projectId;
         GoogleCredentials credentials = getServiceAccountCredentials(serviceAccountKeyPath);

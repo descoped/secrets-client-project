@@ -7,8 +7,17 @@ import io.descoped.service.provider.api.ProviderName;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * The provider {@code safe-configuration}.
+ */
 @ProviderName("safe-configuration")
 public class SafeConfigurationClientInitializer implements SecretManagerClientInitializer {
+
+    /**
+     * Creates the initializer; called by {@link java.util.ServiceLoader}.
+     */
+    public SafeConfigurationClientInitializer() {
+    }
 
     @Override
     public String providerId() {

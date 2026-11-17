@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.descoped.secrets</groupId>
+        <artifactId>secrets-client-project</artifactId>
+        <version>3.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>secrets-client-bom</artifactId>
+    <packaging>pom</packaging>
+
+    <name>Secrets Client BOM</name>
+    <description>Import this to align the versions of every secrets-client module.</description>
+
+    <!-- Manages the secrets modules only: the parent keeps its dependency versions in properties, so nothing else
+         is inherited into this dependencyManagement. -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.descoped.secrets</groupId>
+                <artifactId>secrets-client-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.descoped.secrets</groupId>
+                <artifactId>secrets-provider-safe-configuration</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.descoped.secrets</groupId>
+                <artifactId>secrets-provider-dynamic-configuration</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.descoped.secrets</groupId>
+                <artifactId>secrets-provider-google-secret-manager</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+</project>
