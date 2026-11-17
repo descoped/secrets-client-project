@@ -70,6 +70,7 @@
         <!-- Releases to Maven Central through the Central Portal, by central-publishing-maven-plugin. Only releases:
              SNAPSHOTs are not published.
              Release (Ove approves each one): ./mvnw release:prepare release:perform -P secrets
+             (`-P secrets` is no profile of this POM: ~/.mavenrc sees it and decrypts the Portal token for that run)
              Server `central` in ~/.m2/settings.xml holds the Portal user token and, for Maven 3.10, lists
              https://central.sonatype.com in repositoryOrigins. Releases are uploaded with autoPublish=false and
              published by hand in the Portal. -->
