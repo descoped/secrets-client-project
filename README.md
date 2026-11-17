@@ -58,46 +58,34 @@ From 3.0.0, all modules share one version, and `secrets-client-bom` aligns them:
 ```java
 interface SecretManagerClient extends AutoCloseable {
 
-    /**
-     * Read secret
-     */
-    String readString(String secretName);
-
-    /**
-     * Read secret for a specific version
-     */
+    byte[] readBytes(String secretName);                        // latest version
+    byte[] readBytes(String secretName, String secretVersion);  // null version = latest
+    char[] readChars(String secretName);                        // UTF-8, intermediate bytes wiped
+    char[] readChars(String secretName, String secretVersion);
+    String readString(String secretName);                       // a String cannot be wiped
     String readString(String secretName, String secretVersion);
 
-    /**
-     * Read secret
-     */
-    byte[] readBytes(String secretName);
+    String addVersion(String secretName, byte[] secretValue);   // returns the new version id
+    String addVersion(String secretName, char[] secretValue);
+    String addVersion(String secretName, String secretValue);
 
-    /**
-     * Read secret for a specific version
-     */
-    byte[] readBytes(String secretName, String secretVersion);
+    void close();                                               // idempotent, wipes what the client holds
 
-    /**
-     * Convenience method that converts byte-array to char-array as UTF-8.
-     *
-     * Please notice: The input byte-array will be cleared after conversion.
-     *
-     * @param bytes input buffer
-     * @return a char buffer as utf8. If the input is null or empty, an empty char-array is returned.
-     *         the user is responsible for clearing a char-array copy.
-     */
-    static char[] safeCharArrayAsUTF8(final byte[] bytes);
-
-    /**
-     * Create SecretManagerClient for a 'secrets.provider'
-     *
-     * @param configuration Each provider requires their own properties
-     * @return SecretManagerClient instance
-     */
-    static SecretManagerClient create(Map<String, String> configuration);
+    static SecretManagerClient create(Map<String, String> configuration);  // provider named by "secrets.provider"
 }
 ```
+
+Every provider follows the same contract:
+
+- A secret or version that does not exist throws `SecretNotFoundException`; any other failure throws
+  `SecretManagerException`. Messages name the secret, never its value.
+- `readBytes` and `readChars` return new arrays that the caller owns and should wipe after use. The client never keeps
+  a reference to them, nor to an array passed to `addVersion`.
+- A read-only provider throws `UnsupportedOperationException` from `addVersion`.
+- After `close()`, every other method throws `IllegalStateException`.
+
+The JPMS module is `io.descoped.secrets.api`. It declares `uses` for the provider service, so provider modules on the
+module path are found without the application requiring them.
 
 ## Supported providers
 

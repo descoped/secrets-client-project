@@ -8,7 +8,7 @@ module io.descoped.secrets.provider.dynamic.configuration {
     requires io.descoped.service.provider.api;
     requires io.descoped.dynamic.config;
 
-    requires transitive io.descoped.secrets.client.api;
+    requires transitive io.descoped.secrets.api;
 
     requires org.slf4j;
 

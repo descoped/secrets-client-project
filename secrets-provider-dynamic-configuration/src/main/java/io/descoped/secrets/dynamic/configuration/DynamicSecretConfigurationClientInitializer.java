@@ -4,9 +4,7 @@ import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerClientInitializer;
 import io.descoped.service.provider.api.ProviderName;
 
-import java.util.Collections;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * The provider {@code dynamic-secret-configuration}.
@@ -20,16 +18,7 @@ public class DynamicSecretConfigurationClientInitializer implements SecretManage
     public DynamicSecretConfigurationClientInitializer() {
     }
 
-    @Override
-    public String providerId() {
-        return "dynamic-secret-configuration";
-    }
-
     // Optional: "secrets.property-resource-path"
-    @Override
-    public Set<String> configurationKeys() {
-        return Collections.emptySet();
-    }
 
     @Override
     public SecretManagerClient initialize(Map<String, String> configuration) {

@@ -60,4 +60,19 @@ public class SafeConfigurationClientTest {
             assertEquals("43", new String(client.readBytes("question"), StandardCharsets.UTF_8));
         }
     }
+
+    @Test
+    public void onlyTheLatestVersionExists() {
+        Map<String, String> providerConfiguration = Map.of(
+                "secrets.provider", "safe-configuration",
+                "secrets.property-resource-path", Paths.get("src/test/resources/secret.properties").toAbsolutePath().toString()
+        );
+        try (SecretManagerClient client = SecretManagerClient.create(providerConfiguration)) {
+            assertEquals("password1", client.readString("secret1", "latest"));
+            org.junit.jupiter.api.Assertions.assertThrows(io.descoped.secrets.api.SecretNotFoundException.class,
+                    () -> client.readBytes("secret1", "7"));
+            org.junit.jupiter.api.Assertions.assertThrows(io.descoped.secrets.api.SecretNotFoundException.class,
+                    () -> client.readBytes("missing"));
+        }
+    }
 }

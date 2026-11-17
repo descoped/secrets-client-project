@@ -35,7 +35,7 @@
 
         <!-- Dependency versions. Kept as properties, not in dependencyManagement, so that importing
              secrets-client-bom (which inherits this POM) manages the secrets modules only. -->
-        <service-provider-api.version>2.0.1</service-provider-api.version>
+        <service-provider-api.version>3.0.1</service-provider-api.version>
         <dynamic-configuration.version>2.0.0</dynamic-configuration.version>
         <slf4j.version>2.0.20</slf4j.version>
         <google-auth.version>1.57.0</google-auth.version>

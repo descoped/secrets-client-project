@@ -2,6 +2,8 @@ package io.descoped.secrets.dynamic.configuration;
 
 import io.descoped.config.StoreBasedDynamicConfiguration;
 import io.descoped.secrets.api.SecretManagerClient;
+import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.SecretNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,8 +15,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static java.util.Optional.ofNullable;
 
@@ -28,6 +32,7 @@ public class DynamicSecretConfigurationClient implements SecretManagerClient {
     final Map<String, String> map = new ConcurrentHashMap<>();
     final String propertyResourcePath;
     final Object lock = new Object();
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     /**
      * Reads the secrets from a properties resource.
@@ -55,11 +60,28 @@ public class DynamicSecretConfigurationClient implements SecretManagerClient {
 
     @Override
     public byte[] readBytes(String secretName, String secretVersion) {
-        return ofNullable(map.get(secretName)).map(s -> Base64.getDecoder().decode(s)).orElse(null);
+        if (closed.get()) {
+            throw new IllegalStateException("Client is closed");
+        }
+        Objects.requireNonNull(secretName, "secretName");
+        if (!(secretVersion == null || "latest".equals(secretVersion))) {
+            throw new SecretNotFoundException(secretName, secretVersion);
+        }
+        return ofNullable(map.get(secretName))
+                .map(s -> Base64.getDecoder().decode(s))
+                .orElseThrow(() -> new SecretNotFoundException(secretName, secretVersion));
     }
 
     @Override
     public String addVersion(String secretName, byte[] secretValue) {
+        if (closed.get()) {
+            throw new IllegalStateException("Client is closed");
+        }
+        Objects.requireNonNull(secretName, "secretName");
+        Objects.requireNonNull(secretValue, "secretValue");
+        if (propertyResourcePath == null) {
+            throw new UnsupportedOperationException("No 'secrets.property-resource-path' to write to");
+        }
         String encodedSecretValue = Base64.getEncoder().encodeToString(secretValue);
         map.put(secretName, encodedSecretValue);
         Path path = Path.of(propertyResourcePath);
@@ -77,7 +99,7 @@ public class DynamicSecretConfigurationClient implements SecretManagerClient {
                     props.store(out, null);
                 }
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw new SecretManagerException("Cannot write secret '" + secretName + "' to " + path, e);
             }
         }
         return "latest";
@@ -85,5 +107,8 @@ public class DynamicSecretConfigurationClient implements SecretManagerClient {
 
     @Override
     public void close() {
+        if (closed.compareAndSet(false, true)) {
+            map.clear();
+        }
     }
 }

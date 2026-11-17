@@ -20,11 +20,6 @@ public class GoogleSecretManagerClientInitializer implements SecretManagerClient
     }
 
     @Override
-    public String providerId() {
-        return "google-secret-manager";
-    }
-
-    @Override
     public Set<String> configurationKeys() {
         return Set.of(
                 "secrets.project-id"
