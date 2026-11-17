@@ -153,6 +153,25 @@ class GoogleSecretManagerClientTest {
     }
 
     @Test
+    void malformedJsonFailsWithoutTheBody() throws IOException {
+        google.on("GET", SECRETS + "/a/versions/latest:access", new Response(200, "{\"payload\":{\"data\":hunter2}}"));
+        google.on("GET", SECRETS + "/b/versions/latest:access", new Response(200, "{\"payload\":{\"data\":"));
+        google.on("POST", SECRETS + "/c:addVersion", new Response(200, "{\"name\":\"projects/1/secrets/c/versions/"));
+        try (SecretManagerClient client = open()) {
+            for (String name : List.of("a", "b")) {
+                SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString(name));
+                assertTrue(e.getMessage().startsWith("Cannot parse the response for secret '" + name + "'"),
+                        e.getMessage());
+                for (Throwable t = e; t != null; t = t.getCause()) {
+                    assertFalse(String.valueOf(t.getMessage()).contains("hunter2"), t.toString());
+                }
+            }
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.addVersion("c", "v"));
+            assertTrue(e.getMessage().startsWith("Cannot parse the response for secret 'c'"), e.getMessage());
+        }
+    }
+
+    @Test
     void invalidNamesAreRejectedBeforeAnyRequest() throws IOException {
         try (SecretManagerClient client = open()) {
             for (String name : List.of("", "a/b", "../a", "a b", "a%2Fb", "db.password", "x".repeat(256))) {
