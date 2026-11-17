@@ -85,18 +85,18 @@ class DynamicConfigurationClientTest {
 
     @Test
     void aMissingFileOrDirectoryFails() {
-        assertThrows(SecretManagerException.class,
-                () -> open(Map.of("secrets.property-resource-path", dir.resolve("missing").toString())));
-        assertThrows(SecretManagerException.class,
-                () -> open(Map.of("secrets.directory", dir.resolve("missing").toString())));
+        Map<String, String> missingFile = Map.of("secrets.property-resource-path", dir.resolve("missing").toString());
+        assertThrows(SecretManagerException.class, () -> open(missingFile));
+        Map<String, String> missingDirectory = Map.of("secrets.directory", dir.resolve("missing").toString());
+        assertThrows(SecretManagerException.class, () -> open(missingDirectory));
     }
 
     @Test
     void anUnresolvedReferenceFailsWithoutTheValue() throws IOException {
         Path file = dir.resolve("secrets.properties");
         Files.writeString(file, "a=hunter2${missing}\n");
-        SecretManagerException e = assertThrows(SecretManagerException.class,
-                () -> open(Map.of("secrets.property-resource-path", file.toString())));
+        Map<String, String> configuration = Map.of("secrets.property-resource-path", file.toString());
+        SecretManagerException e = assertThrows(SecretManagerException.class, () -> open(configuration));
         for (Throwable t = e; t != null; t = t.getCause()) {
             assertFalse(String.valueOf(t.getMessage()).contains("hunter2"), t.toString());
         }

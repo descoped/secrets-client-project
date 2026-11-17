@@ -85,23 +85,26 @@ class SafeConfigurationClientTest {
 
     @Test
     void malformedLinesFailWithTheLineNumberAndNeverTheValue() throws IOException {
-        SecretManagerException e = assertThrows(SecretManagerException.class,
-                () -> open(file("a=1\nhunter2\n")));
+        Path noEquals = file("a=1\nhunter2\n");
+        SecretManagerException e = assertThrows(SecretManagerException.class, () -> open(noEquals));
         assertTrue(e.getMessage().contains("line 2 has no '='"), e.getMessage());
         assertFalse(e.getMessage().contains("hunter2"));
 
-        e = assertThrows(SecretManagerException.class, () -> open(file("  =hunter2\n")));
+        Path emptyKey = file("  =hunter2\n");
+        e = assertThrows(SecretManagerException.class, () -> open(emptyKey));
         assertTrue(e.getMessage().contains("line 1 has an empty key"), e.getMessage());
         assertFalse(e.getMessage().contains("hunter2"));
 
-        e = assertThrows(SecretManagerException.class, () -> open(file("a=1\nb=2\na=hunter2\n")));
+        Path duplicate = file("a=1\nb=2\na=hunter2\n");
+        e = assertThrows(SecretManagerException.class, () -> open(duplicate));
         assertTrue(e.getMessage().contains("line 3: duplicate key 'a'"), e.getMessage());
         assertFalse(e.getMessage().contains("hunter2"));
     }
 
     @Test
     void aMissingFileFails() {
-        assertThrows(SecretManagerException.class, () -> open(dir.resolve("missing.properties")));
+        Path missing = dir.resolve("missing.properties");
+        assertThrows(SecretManagerException.class, () -> open(missing));
     }
 
     @Test
