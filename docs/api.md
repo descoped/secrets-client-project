@@ -100,7 +100,9 @@ A `null` name or value | `NullPointerException`
 - `readBytes` and `readChars` return a new array that the caller owns. The client keeps no reference to it, nor to an
   array passed to `addVersion`, so the caller can and should wipe both when done: `Arrays.fill(bytes, (byte) 0)`,
   `Arrays.fill(chars, '\0')`.
-- `close()` is idempotent and wipes what the client holds in memory.
+- `close()` is idempotent and wipes what the client holds in memory. A call already running when `close()` is called
+  either completes normally or throws `IllegalStateException`; it never fails in any other way or returns a partial
+  value.
 - Clients are thread-safe.
 
 ## Keeping secrets out of memory

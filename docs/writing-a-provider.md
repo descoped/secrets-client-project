@@ -7,7 +7,9 @@ A provider is two classes in a named module:
 
 1. A `SecretManagerClient` implementation. Implement `readBytes(String, String)`, `addVersion(String, byte[])` and
    `close()`; the other methods are defaults built on these. Follow [the contract](api.md#the-contract) exactly; the
-   default methods rely on it.
+   default methods rely on it. In particular, `close()` may run while other threads are inside a call: read the
+   client's state once per call (into a local, or under a lock) so such a call finishes or throws
+   `IllegalStateException`, never a `NullPointerException`.
 2. A `SecretManagerClientInitializer`, with a public no-argument constructor, annotated with
    `@ProviderName("my-provider")`:
 
