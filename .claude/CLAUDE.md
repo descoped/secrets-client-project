@@ -41,14 +41,13 @@ change to the API or to a provider's documented behaviour needs a new major vers
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and
   outdated code and configuration is removed, not carried along.
-- **Releases only with the owner's go-ahead.** SNAPSHOTs are fine; a release (`release:prepare`/`release:perform`, an
-  upload to the Central Portal) is made by the owner or on his explicit word, and `CHANGELOG.md` gets its entry first.
-- **Publishing.** Merges to `master` publish SNAPSHOTs of every module to the Central Portal snapshot repository
-  (`ci.yml`, step "Publish SNAPSHOT") with the secrets `CENTRAL_TOKEN_USER` / `CENTRAL_TOKEN_PASSWORD`; the step fails
-  when they are missing. Releases go through the Central Portal (profiles `central,sign`), only with the owner's
-  approval. CI never publishes a release. Maven 3.10 sends a server's credentials only to the hosts it knows for that
-  id, and the id `central` is bound to Maven Central, so the server `central` must list `https://central.sonatype.com`
-  in `repositoryOrigins`: in `.github/maven-settings.xml` for CI, and in `~/.m2/settings.xml` for deploys by hand.
+- **Releases only with the owner's go-ahead.** A release (`release:prepare`/`release:perform`, an upload to the
+  Central Portal) is made by the owner or on his explicit word, and `CHANGELOG.md` gets its entry first.
+- **Publishing.** Only releases are published, by hand, through the Central Portal (profiles `central,sign`).
+  **No SNAPSHOTs** are published, by CI or by hand: the Portal's free tier limits monthly publishing (owner's
+  decision, 2026-11-17). CI publishes nothing. Maven 3.10 sends a server's credentials only to the hosts it knows for
+  that id, and the id `central` is bound to Maven Central, so the server `central` in `~/.m2/settings.xml` must list
+  `https://central.sonatype.com` in `repositoryOrigins`.
 - **SonarCloud**: one project, `descoped_secrets-client-project`, for the whole reactor.
 
 ## Testing
@@ -79,6 +78,4 @@ src/it/consumer/run.sh           # JPMS smoke test: an application that requires
                                  # provider, on the module path (Google's dependencies as automatic modules) and
                                  # the class path; jdeps --check on the modules with named dependencies only
 ./mvnw verify -P coverage        # JaCoCo report per module in <module>/target/site/jacoco
-./mvnw deploy -P central,secrets # SNAPSHOT to the Central Portal by hand (the token comes from ~/.mavenrc;
-                                 # ~/.m2/settings.xml lists https://central.sonatype.com in repositoryOrigins)
 ```

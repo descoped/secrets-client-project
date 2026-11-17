@@ -3,7 +3,8 @@ name: CI
 # One job on JDK 17, the baseline: every build compiles with `release 17`, so the bytecode does not depend on the
 # JDK, and 17 is the oldest runtime users have. Every run: build, tests and Javadoc of every module, and the JPMS
 # consumer smoke test. Pushes to master and release tags, and pull requests from this repository, add coverage and
-# the SonarCloud analysis (not gating; pull requests from forks get no token). master then publishes a SNAPSHOT.
+# the SonarCloud analysis (not gating; pull requests from forks get no token). CI publishes nothing: releases are
+# made by hand (see .claude/CLAUDE.md), and SNAPSHOTs are not published.
 on:
   push:
     branches: [master]
@@ -30,11 +31,10 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same pull request or branch ends the run it replaces, except on master, where a run may be
-# publishing a SNAPSHOT: there a newer merge waits instead of cancelling an upload half way.
+# A newer push to the same pull request or branch ends the run it replaces.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -65,7 +65,7 @@ jobs:
         if: env.ANALYSE == 'true'
         run: ./mvnw --batch-mode --no-transfer-progress verify javadoc:javadoc -P coverage
 
-      # Analysis only: a SonarCloud outage or token problem must not stop the SNAPSHOT, so this step does not gate.
+      # Analysis only: a SonarCloud outage or token problem must not fail the build, so this step does not gate.
       # On a pull request the scanner reads the pull request number, branch and base from GitHub Actions itself.
       - name: SonarCloud
         if: env.ANALYSE == 'true'
@@ -76,36 +76,3 @@ jobs:
 
       - name: JPMS consumer smoke test
         run: src/it/consumer/run.sh
-
-      # Every change merged to master is published as a SNAPSHOT to the Central Portal snapshot repository
-      # (https://central.sonatype.com/repository/maven-snapshots/). Releases are never published from CI.
-      # The token goes in through .github/maven-settings.xml, which binds it to central.sonatype.com (Maven 3.10).
-      - name: Publish SNAPSHOT
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        env:
-          CENTRAL_TOKEN_USER: ${{ secrets.CENTRAL_TOKEN_USER }}
-          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
-        run: |
-          if [ -z "$CENTRAL_TOKEN_USER" ] || [ -z "$CENTRAL_TOKEN_PASSWORD" ]; then
-            echo "::error::the CENTRAL_TOKEN_USER / CENTRAL_TOKEN_PASSWORD secrets are not available"; exit 1
-          fi
-          version=$(sed -n 's/^version=//p' secrets-client-api/target/maven-archiver/pom.properties)
-          # The release plugin pushes its "prepare release" commit (a release version) to master on its own. That
-          # commit is not published here: releases are published by hand, so it is skipped. Any other non-SNAPSHOT
-          # version on master (a hand edit of the POM) still fails, as does a missing version.
-          subject=$(git log -1 --format=%s)
-          case "$version" in
-            '')
-              echo "::error::no version in secrets-client-api/target/maven-archiver/pom.properties"; exit 1 ;;
-            *-SNAPSHOT) ;;
-            *)
-              case "$subject" in
-                "[maven-release-plugin] prepare release "*)
-                  echo "::notice::release commit for $version; releases are published by hand, so no SNAPSHOT"
-                  exit 0 ;;
-                *)
-                  echo "::error::master is at $version, not a SNAPSHOT, and this is not a release commit"; exit 1 ;;
-              esac ;;
-          esac
-          ./mvnw --batch-mode --no-transfer-progress --settings .github/maven-settings.xml \
-            deploy -P central -DskipTests
