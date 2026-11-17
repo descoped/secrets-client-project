@@ -8,4 +8,4 @@
   - [dynamic-configuration](providers/dynamic-configuration.md): read-only, for tests and migration
   - [google-secret-manager](providers/google-secret-manager.md): Google Secret Manager, read and write
 - [Writing a provider](writing-a-provider.md): adding a backend of your own
-- [Migrating from 2.x](migrating-from-2.x.md)
+- [Migrating from 2.x](migrating-from-2.x.md), and from the 0.x versions
