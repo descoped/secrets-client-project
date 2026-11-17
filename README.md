@@ -9,6 +9,8 @@ and never appear in exception messages. Java 17 or later, on the module path or 
 
 **[Documentation](docs/README.md)**: getting started, the API, each provider, and migrating from 2.x.
 
+Changes by version are in the [changelog](CHANGELOG.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
 ## How it works
 
 An application compiles against `secrets-client-api` and creates a client from a configuration map:
