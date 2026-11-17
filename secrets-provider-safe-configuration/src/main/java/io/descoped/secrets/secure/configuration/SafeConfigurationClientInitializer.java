@@ -20,11 +20,6 @@ public class SafeConfigurationClientInitializer implements SecretManagerClientIn
     }
 
     @Override
-    public String providerId() {
-        return "safe-configuration";
-    }
-
-    @Override
     public Set<String> configurationKeys() {
         return Set.of("secrets.property-resource-path");
     }

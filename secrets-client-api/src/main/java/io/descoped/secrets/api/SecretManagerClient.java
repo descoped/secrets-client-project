@@ -4,110 +4,274 @@ import io.descoped.service.provider.api.ProviderConfigurator;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * SecretManagerClient is a provider based API for reading secrets.
+ * Reads and writes secrets through a provider chosen by configuration.
+ *
+ * <pre>{@code
+ * try (SecretManagerClient client = SecretManagerClient.create(Map.of(
+ *         "secrets.provider", "safe-configuration",
+ *         "secrets.property-resource-path", "/run/secrets/app.properties"))) {
+ *     char[] password = client.readChars("db.password");
+ *     try {
+ *         connect(password);
+ *     } finally {
+ *         Arrays.fill(password, '\0');
+ *     }
+ * }
+ * }</pre>
+ *
+ * <h2>Contract</h2>
+ * Every provider behaves the same way:
+ * <ul>
+ *     <li>A secret or version that does not exist throws {@link SecretNotFoundException}.</li>
+ *     <li>Any other failure throws {@link SecretManagerException}. Messages name the secret, never its value.</li>
+ *     <li>{@link #readBytes(String, String)} returns a new array that the caller owns and should wipe after use. The
+ *     client never keeps a reference to it, and never to an array passed to {@link #addVersion(String, byte[])}.</li>
+ *     <li>A provider that cannot write throws {@link UnsupportedOperationException} from
+ *     {@link #addVersion(String, byte[])}.</li>
+ *     <li>After {@link #close()}, every method except {@code close()} throws {@link IllegalStateException}.
+ *     {@code close()} is idempotent and wipes what the client holds in memory.</li>
+ *     <li>Clients are thread-safe.</li>
+ * </ul>
+ *
+ * <p>{@link #readString(String)} is a convenience for values that are not sensitive or end up in a {@link String}
+ * anyway: a {@code String} is immutable and cannot be wiped. Prefer {@link #readChars(String)} or
+ * {@link #readBytes(String)} for passwords and keys.
  */
 public interface SecretManagerClient extends AutoCloseable {
 
     /**
-     * Add a binary version of the secret.
-     *
-     * @param secretName  the name of the secret to add a version to.
-     * @param secretValue the value of the secret version.
-     * @return the version name
+     * The configuration key that names the provider, e.g. {@code safe-configuration}.
      */
-    String addVersion(String secretName, byte[] secretValue);
+    String PROVIDER_KEY = "secrets.provider";
 
     /**
-     * Add a string version of the secret.
+     * Reads a version of a secret.
      *
-     * @param secretName  the name of the secret to add a version to.
-     * @param secretValue the value of the secret version.
-     * @return the version name
-     */
-    default String addVersion(String secretName, String secretValue) {
-        return addVersion(secretName, secretValue.getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * Read secret
-     *
-     * @param secretName the name of the secret
-     * @return secret value as string
-     */
-    default String readString(String secretName) {
-        return new String(readBytes(secretName), StandardCharsets.UTF_8);
-    }
-
-    /**
-     * Read secret for a specific version
-     *
-     * @param secretName the name of the secret
+     * @param secretName    the name of the secret
      * @param secretVersion the version to read, or {@code null} for the latest
-     * @return secret value as string
+     * @return a new array with the value, owned by the caller
+     * @throws SecretNotFoundException if the secret or the version does not exist
+     * @throws SecretManagerException  if the secret cannot be read
+     * @throws IllegalStateException   if the client is closed
+     * @throws NullPointerException    if {@code secretName} is {@code null}
      */
-    default String readString(String secretName, String secretVersion) {
-        return new String(readBytes(secretName, secretVersion), StandardCharsets.UTF_8);
-    }
+    byte[] readBytes(String secretName, String secretVersion);
 
     /**
-     * Read secret
+     * Reads the latest version of a secret.
      *
      * @param secretName the name of the secret
-     * @return secret value as byte-array
+     * @return a new array with the value, owned by the caller
+     * @throws SecretNotFoundException if the secret does not exist
+     * @throws SecretManagerException  if the secret cannot be read
+     * @throws IllegalStateException   if the client is closed
+     * @throws NullPointerException    if {@code secretName} is {@code null}
      */
     default byte[] readBytes(String secretName) {
         return readBytes(secretName, null);
     }
 
     /**
-     * Read secret for a specific version
+     * Reads a version of a secret as UTF-8 characters. The intermediate bytes are wiped.
      *
-     * @param secretName the name of the secret
+     * @param secretName    the name of the secret
      * @param secretVersion the version to read, or {@code null} for the latest
-     * @return secret value as byte-array
+     * @return a new array with the value, owned by the caller
+     * @throws SecretNotFoundException if the secret or the version does not exist
+     * @throws SecretManagerException  if the secret cannot be read or is not valid UTF-8
+     * @throws IllegalStateException   if the client is closed
+     * @throws NullPointerException    if {@code secretName} is {@code null}
      */
-    byte[] readBytes(String secretName, String secretVersion);
+    default char[] readChars(String secretName, String secretVersion) {
+        byte[] bytes = readBytes(secretName, secretVersion);
+        try {
+            return decodeUtf8(bytes);
+        } catch (CharacterCodingException e) {
+            throw new SecretManagerException("Secret '" + secretName + "' is not valid UTF-8", e);
+        } finally {
+            Arrays.fill(bytes, (byte) 0);
+        }
+    }
 
     /**
-     * Close provider
+     * Reads the latest version of a secret as UTF-8 characters. The intermediate bytes are wiped.
+     *
+     * @param secretName the name of the secret
+     * @return a new array with the value, owned by the caller
+     * @throws SecretNotFoundException if the secret does not exist
+     * @throws SecretManagerException  if the secret cannot be read or is not valid UTF-8
+     * @throws IllegalStateException   if the client is closed
+     * @throws NullPointerException    if {@code secretName} is {@code null}
+     */
+    default char[] readChars(String secretName) {
+        return readChars(secretName, null);
+    }
+
+    /**
+     * Reads a version of a secret as a UTF-8 string. A {@code String} cannot be wiped; see the class description.
+     *
+     * @param secretName    the name of the secret
+     * @param secretVersion the version to read, or {@code null} for the latest
+     * @return the value
+     * @throws SecretNotFoundException if the secret or the version does not exist
+     * @throws SecretManagerException  if the secret cannot be read or is not valid UTF-8
+     * @throws IllegalStateException   if the client is closed
+     * @throws NullPointerException    if {@code secretName} is {@code null}
+     */
+    default String readString(String secretName, String secretVersion) {
+        char[] chars = readChars(secretName, secretVersion);
+        try {
+            return new String(chars);
+        } finally {
+            Arrays.fill(chars, '\0');
+        }
+    }
+
+    /**
+     * Reads the latest version of a secret as a UTF-8 string. A {@code String} cannot be wiped; see the class
+     * description.
+     *
+     * @param secretName the name of the secret
+     * @return the value
+     * @throws SecretNotFoundException if the secret does not exist
+     * @throws SecretManagerException  if the secret cannot be read or is not valid UTF-8
+     * @throws IllegalStateException   if the client is closed
+     * @throws NullPointerException    if {@code secretName} is {@code null}
+     */
+    default String readString(String secretName) {
+        return readString(secretName, null);
+    }
+
+    /**
+     * Adds a new version of a secret, creating the secret if it does not exist. The client copies
+     * {@code secretValue}; the caller still owns it and may wipe it afterwards.
+     *
+     * @param secretName  the name of the secret
+     * @param secretValue the value of the new version
+     * @return the id of the new version, as {@link #readBytes(String, String)} accepts it
+     * @throws SecretManagerException        if the version cannot be added
+     * @throws UnsupportedOperationException if the provider is read-only
+     * @throws IllegalStateException         if the client is closed
+     * @throws NullPointerException          if an argument is {@code null}
+     */
+    String addVersion(String secretName, byte[] secretValue);
+
+    /**
+     * Adds a new version of a secret from UTF-8 characters. The intermediate bytes are wiped.
+     *
+     * @param secretName  the name of the secret
+     * @param secretValue the value of the new version
+     * @return the id of the new version
+     * @throws SecretManagerException        if the version cannot be added
+     * @throws UnsupportedOperationException if the provider is read-only
+     * @throws IllegalStateException         if the client is closed
+     * @throws NullPointerException          if an argument is {@code null}
+     */
+    default String addVersion(String secretName, char[] secretValue) {
+        Objects.requireNonNull(secretValue, "secretValue");
+        ByteBuffer encoded = StandardCharsets.UTF_8.encode(CharBuffer.wrap(secretValue));
+        byte[] bytes = new byte[encoded.remaining()];
+        encoded.get(bytes);
+        wipe(encoded);
+        try {
+            return addVersion(secretName, bytes);
+        } finally {
+            Arrays.fill(bytes, (byte) 0);
+        }
+    }
+
+    /**
+     * Adds a new version of a secret from a string, as UTF-8.
+     *
+     * @param secretName  the name of the secret
+     * @param secretValue the value of the new version
+     * @return the id of the new version
+     * @throws SecretManagerException        if the version cannot be added
+     * @throws UnsupportedOperationException if the provider is read-only
+     * @throws IllegalStateException         if the client is closed
+     * @throws NullPointerException          if an argument is {@code null}
+     */
+    default String addVersion(String secretName, String secretValue) {
+        Objects.requireNonNull(secretValue, "secretValue");
+        byte[] bytes = secretValue.getBytes(StandardCharsets.UTF_8);
+        try {
+            return addVersion(secretName, bytes);
+        } finally {
+            Arrays.fill(bytes, (byte) 0);
+        }
+    }
+
+    /**
+     * Closes the client and wipes what it holds in memory. Idempotent.
      */
     @Override
     void close();
 
     /**
-     * Convenience method that converts byte-array to char-array as UTF-8.
-     * <p>
-     * Please notice: The input byte-array will be cleared after conversion.
+     * Creates a client for the provider named by {@value #PROVIDER_KEY}. The whole map is passed to the provider;
+     * each provider documents the keys it reads.
      *
-     * @param bytes input buffer
-     * @return a char buffer as utf8. If the input is null or empty, an empty char-array is returned.
-     * the user is responsible for clearing a char-array copy.
-     */
-    static char[] safeCharArrayAsUTF8(final byte[] bytes) {
-        if (bytes == null || bytes.length == 0) {
-            return new char[0];
-        }
-        CharBuffer cb = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(bytes));
-        final char[] chars = new char[cb.remaining()];
-        cb.get(chars);
-        Arrays.fill(bytes, (byte) 0);
-        cb.clear();
-        return chars;
-    }
-
-    /**
-     * Create SecretManagerClient for a 'secrets.provider'
+     * <p>Providers are found with {@link java.util.ServiceLoader}. This module declares {@code uses} for
+     * {@link SecretManagerClientInitializer}, so a provider module on the module path is resolved without anyone
+     * requiring it.
      *
-     * @param configuration Each provider requires their own properties
-     * @return SecretManagerClient instance
+     * @param configuration the configuration, including {@value #PROVIDER_KEY}
+     * @return a new client
+     * @throws IllegalArgumentException if {@value #PROVIDER_KEY} is missing or blank, or the provider lacks a required
+     *                                  key
+     * @throws io.descoped.service.provider.api.ProviderException if no provider, or more than one, has that name
+     * @throws SecretManagerException   if the provider cannot be initialized
+     * @throws NullPointerException     if {@code configuration}, or a key or value in it, is {@code null}
      */
     static SecretManagerClient create(Map<String, String> configuration) {
-        return ProviderConfigurator.configure(configuration, configuration.get("secrets.provider"), SecretManagerClientInitializer.class);
+        Objects.requireNonNull(configuration, "configuration");
+        String provider = configuration.get(PROVIDER_KEY);
+        if (provider == null || provider.isBlank()) {
+            throw new IllegalArgumentException("Missing configuration '" + PROVIDER_KEY + "'");
+        }
+        return ProviderConfigurator.configure(SecretManagerClientInitializer.class, provider, configuration);
     }
 
+    private static char[] decodeUtf8(byte[] bytes) throws CharacterCodingException {
+        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        // UTF-8 never decodes to more chars than it has bytes.
+        char[] buffer = new char[bytes.length];
+        try {
+            CharBuffer out = CharBuffer.wrap(buffer);
+            ByteBuffer in = ByteBuffer.wrap(bytes);
+            check(decoder.decode(in, out, true));
+            check(decoder.flush(out));
+            return Arrays.copyOf(buffer, out.position());
+        } finally {
+            Arrays.fill(buffer, '\0');
+        }
+    }
+
+    private static void check(java.nio.charset.CoderResult result) throws CharacterCodingException {
+        if (result.isError()) {
+            result.throwException();
+        }
+    }
+
+    private static void wipe(ByteBuffer buffer) {
+        if (buffer.hasArray()) {
+            Arrays.fill(buffer.array(), (byte) 0);
+        } else {
+            buffer.clear();
+            while (buffer.hasRemaining()) {
+                buffer.put((byte) 0);
+            }
+        }
+    }
 }

@@ -9,6 +9,8 @@ import com.google.auth.oauth2.ComputeEngineCredentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import io.descoped.secrets.api.SecretManagerClient;
+import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.SecretNotFoundException;
 
 import java.io.IOException;
 import java.net.URI;
@@ -20,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -61,10 +64,10 @@ public class GoogleSecretManagerClient implements SecretManagerClient {
     }
 
     GoogleCredentials getServiceAccountCredentials(String serviceAccountKeyPath) {
-        try {
-            return ServiceAccountCredentials.fromStream(Files.newInputStream(Paths.get(serviceAccountKeyPath), StandardOpenOption.READ));
+        try (var in = Files.newInputStream(Paths.get(serviceAccountKeyPath), StandardOpenOption.READ)) {
+            return ServiceAccountCredentials.fromStream(in);
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new SecretManagerException("Cannot read the service-account key " + serviceAccountKeyPath, e);
         }
     }
 
@@ -72,15 +75,16 @@ public class GoogleSecretManagerClient implements SecretManagerClient {
         try {
             return scopedCredentials.refreshAccessToken();
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new SecretManagerException("Cannot get a Google access token", e);
         }
     }
 
     @Override
     public byte[] readBytes(String secretName, String secretVersion) {
         if (closed.get()) {
-            throw new RuntimeException("Client is closed!");
+            throw new IllegalStateException("Client is closed");
         }
+        Objects.requireNonNull(secretName, "secretName");
         try {
             String accessToken = String.format("Bearer %s", this.accessToken.getTokenValue());
             URI uri = URI.create(String.format("https://secretmanager.googleapis.com/v1/projects/%s/secrets/%s/versions/%s:access",
@@ -94,34 +98,39 @@ public class GoogleSecretManagerClient implements SecretManagerClient {
                     .build();
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 404) {
+                throw new SecretNotFoundException(secretName, secretVersion);
+            }
             if (response.statusCode() != 200) {
-                throw new RuntimeException(String.format("Error (%s) reading secret '%s' cause %s", response.statusCode(), secretName, response.body()));
+                throw new SecretManagerException(String.format("Error (%s) reading secret '%s'", response.statusCode(), secretName));
             }
 
             try {
                 JsonNode responseNode = mapper.readTree(response.body());
-                if (!responseNode.has("payload")) {
-                    throw new RuntimeException("Unable to resolve payload from " + response.body());
-                }
-                if (!responseNode.get("payload").has("data")) {
-                    throw new RuntimeException("Unable to resolve payload.data from " + response.body());
+                if (!responseNode.has("payload") || !responseNode.get("payload").has("data")) {
+                    throw new SecretManagerException("No payload.data in the response for secret '" + secretName + "'");
                 }
                 return responseNode.get("payload").get("data").binaryValue();
 
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw new SecretManagerException("Cannot parse the response for secret '" + secretName + "'", e);
             }
 
-        } catch (InterruptedException | IOException e) {
-            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SecretManagerException("Interrupted while reading secret '" + secretName + "'", e);
+        } catch (IOException e) {
+            throw new SecretManagerException("Cannot read secret '" + secretName + "'", e);
         }
     }
 
     @Override
     public String addVersion(String secretName, byte[] secretValue) {
         if (closed.get()) {
-            throw new RuntimeException("Client is closed!");
+            throw new IllegalStateException("Client is closed");
         }
+        Objects.requireNonNull(secretName, "secretName");
+        Objects.requireNonNull(secretValue, "secretValue");
         try {
             HttpResponse<String> checkSecretResponse;
             {
@@ -162,10 +171,10 @@ public class GoogleSecretManagerClient implements SecretManagerClient {
 
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() != 200) {
-                    throw new RuntimeException(String.format("Error (%s) creating secret '%s' cause %s", response.statusCode(), secretName, response.body()));
+                    throw new SecretManagerException(String.format("Error (%s) creating secret '%s'", response.statusCode(), secretName));
                 }
             } else {
-                throw new RuntimeException(String.format("Error (%s) checking secret '%s' cause %s", checkSecretResponse.statusCode(), secretName, checkSecretResponse.body()));
+                throw new SecretManagerException(String.format("Error (%s) checking secret '%s'", checkSecretResponse.statusCode(), secretName));
             }
             {
                 ObjectNode secretVersion = mapper.createObjectNode();
@@ -187,7 +196,7 @@ public class GoogleSecretManagerClient implements SecretManagerClient {
 
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() != 200) {
-                    throw new RuntimeException(String.format("Error (%s) creating secret '%s' cause %s", response.statusCode(), secretName, response.body()));
+                    throw new SecretManagerException(String.format("Error (%s) adding a version to secret '%s'", response.statusCode(), secretName));
                 }
 
                 JsonNode responseSecretVersion = mapper.readTree(response.body());
@@ -195,8 +204,11 @@ public class GoogleSecretManagerClient implements SecretManagerClient {
                 String[] versionPathElements = versionUrl.split("/");
                 return versionPathElements[versionPathElements.length - 1];
             }
-        } catch (InterruptedException | IOException e) {
-            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SecretManagerException("Interrupted while adding a version to secret '" + secretName + "'", e);
+        } catch (IOException e) {
+            throw new SecretManagerException("Cannot add a version to secret '" + secretName + "'", e);
         }
     }
 

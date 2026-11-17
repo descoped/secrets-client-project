@@ -6,7 +6,7 @@ import io.descoped.secrets.api.SecretManagerClientInitializer;
 module io.descoped.secrets.provider.safe.configuration {
 
     requires io.descoped.service.provider.api;
-    requires transitive io.descoped.secrets.client.api;
+    requires transitive io.descoped.secrets.api;
 
     requires org.slf4j;
 

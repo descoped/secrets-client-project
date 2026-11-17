@@ -12,7 +12,7 @@ and must stay true when behaviour changes.
 |---|---|---|
 | `secrets-client-project` (root) | n/a | parent and aggregator |
 | `secrets-client-bom` | n/a | BOM of the modules below |
-| `secrets-client-api` | `io.descoped.secrets.client.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
+| `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe.configuration` | local `key=value` file, values as byte arrays |
 | `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic.configuration` | `io.descoped.config:dynamic-configuration`, for tests and migration |
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google.rest.api` | Google Secret Manager REST API with google-auth |

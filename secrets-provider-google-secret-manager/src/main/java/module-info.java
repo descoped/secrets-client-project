@@ -8,7 +8,7 @@ module io.descoped.secrets.provider.google.rest.api {
     requires java.net.http;
 
     requires io.descoped.service.provider.api;
-    requires transitive io.descoped.secrets.client.api;
+    requires transitive io.descoped.secrets.api;
 
     requires com.google.auth;
     requires com.google.auth.oauth2;

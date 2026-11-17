@@ -14,12 +14,11 @@
       "automerge": true
     },
     {
-      "description": "Held on 2.x until the 3.0.0 revision moves this project to their 3.x API; the hold is removed in that revision",
+      "description": "Held on 2.x until the dynamic-configuration provider moves to its 3.x API; the hold is removed then",
       "matchManagers": [
         "maven"
       ],
       "matchPackageNames": [
-        "io.descoped.spi:service-provider-api",
         "io.descoped.config:dynamic-configuration"
       ],
       "allowedVersions": "<3"

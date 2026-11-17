@@ -1,6 +1,8 @@
 package io.descoped.secrets.secure.configuration;
 
 import io.descoped.secrets.api.SecretManagerClient;
+import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.SecretNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,10 +16,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -27,7 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class SafeConfigurationClient implements SecretManagerClient {
 
     static final Logger LOG = LoggerFactory.getLogger(SafeConfigurationClient.class);
-    private final Map<String, byte[]> secureMap = new LinkedHashMap<>();
+    private final Map<String, byte[]> secureMap = new ConcurrentHashMap<>();
     private final Path resourcePath;
     private final Object lock = new Object();
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -41,7 +43,7 @@ public class SafeConfigurationClient implements SecretManagerClient {
         Objects.requireNonNull(propertyResourcePath);
         resourcePath = Paths.get(propertyResourcePath);
         if (!Files.isReadable(resourcePath)) {
-            throw new RuntimeException("The file " + propertyResourcePath + " is not readable");
+            throw new SecretManagerException("The file " + propertyResourcePath + " is not readable");
         }
         loadResource(resourcePath);
     }
@@ -98,7 +100,7 @@ public class SafeConfigurationClient implements SecretManagerClient {
             }
 
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new SecretManagerException("Cannot read " + resourcePath, e);
         } finally {
             Arrays.fill(bytes, (byte) 0);
             Arrays.fill(chars, '\u0000');
@@ -144,7 +146,12 @@ public class SafeConfigurationClient implements SecretManagerClient {
         if (closed.get()) {
             throw new IllegalStateException("Client is closed!");
         }
-        secureMap.put(secretName, secretValue);
+        Objects.requireNonNull(secretName, "secretName");
+        Objects.requireNonNull(secretValue, "secretValue");
+        byte[] previous = secureMap.put(secretName, secretValue.clone());
+        if (previous != null) {
+            Arrays.fill(previous, (byte) 0);
+        }
         if (!Files.isWritable(resourcePath)) {
             LOG.warn("Secret configuration is NOT writable: {}", resourcePath.normalize().toAbsolutePath());
             return "latest";
@@ -159,7 +166,7 @@ public class SafeConfigurationClient implements SecretManagerClient {
                     props.store(out, null);
                 }
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw new SecretManagerException("Cannot write secret '" + secretName + "' to " + resourcePath, e);
             }
         }
         return "latest";
@@ -170,7 +177,12 @@ public class SafeConfigurationClient implements SecretManagerClient {
         if (closed.get()) {
             throw new IllegalStateException("Client is closed!");
         }
-        return secureMap.get(secretName);
+        Objects.requireNonNull(secretName, "secretName");
+        byte[] value = secureMap.get(secretName);
+        if (value == null) {
+            throw new SecretNotFoundException(secretName, secretVersion);
+        }
+        return value.clone();
     }
 
     @Override
