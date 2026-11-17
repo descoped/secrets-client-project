@@ -34,4 +34,3 @@ dependency-reduced-pom.xml
 
 **/application-override.properties
 
-/secrets-*
