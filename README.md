@@ -87,9 +87,6 @@ Every provider follows the same contract:
 - A read-only provider throws `UnsupportedOperationException` from `addVersion`.
 - After `close()`, every other method throws `IllegalStateException`.
 
-The JPMS module is `io.descoped.secrets.api`. It declares `uses` for the provider service, so provider modules on the
-module path are found without the application requiring them.
-
 ## Supported providers
 
 ### Dynamic configuration
@@ -209,8 +206,10 @@ Google replication of new secrets | `europe-north1` | automatic, or `secrets.rep
 Provider implementation classes | public | package-private; only the initializers are public
 `service-provider-api` | 2.x | 3.x (`providerId()` is gone; the `@ProviderName` annotation names a provider)
 
-safe-configuration files written by 2.x `addVersion` went through `java.util.Properties.store`, which escapes `=`,
-`:`, `#` and `!` (for example `https\://host`). 3.0 reads values verbatim, so remove those backslashes once.
+safe-configuration files written by 2.x `addVersion` went through `java.util.Properties.store(OutputStream, ..)`,
+which escapes values: `\\` for `\`, `\=`, `\:`, `\#`, `\!`, `\t`, `\n`, `\r`, `\f`, `\ ` for a leading space, and
+`\uXXXX` for every character outside ISO-8859-1 (for example `https\://host`, `bl\u00E5`). 3.0 reads values verbatim,
+so undo every one of these escapes once, in every line of such a file.
 
 ## Building
 

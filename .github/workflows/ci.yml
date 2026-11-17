@@ -1,8 +1,8 @@
 name: CI
 
 # One job on JDK 17, the baseline: every build compiles with `release 17`, so the bytecode does not depend on the
-# JDK, and 17 is the oldest runtime users have. Pull requests: build, tests and Javadoc of every module, and the JPMS consumer smoke test.
-# Pushes to master and release tags add coverage and the SonarCloud analysis (not gating); master then publishes a
+# JDK, and 17 is the oldest runtime users have. Pull requests: build, tests and Javadoc of every module, and the
+# JPMS consumer smoke test. Pushes to master and release tags add coverage and the SonarCloud analysis (not gating); master then publishes a
 # SNAPSHOT.
 on:
   push:
