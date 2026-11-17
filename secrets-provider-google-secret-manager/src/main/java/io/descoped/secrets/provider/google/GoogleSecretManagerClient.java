@@ -285,7 +285,10 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
         private String message;
 
         void read(String field, JsonParser json) throws IOException {
-            if ("status".equals(field)) {
+            if (json.currentToken().isStructStart()) {
+                // Not the documented string: skip the whole value so the parser keeps its place.
+                json.skipChildren();
+            } else if ("status".equals(field)) {
                 status = json.getValueAsString();
             } else if ("message".equals(field)) {
                 message = json.getValueAsString();
@@ -323,21 +326,24 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
      * A top-level string field of a JSON response that holds no secret.
      */
     private static String field(byte[] body, String name, String secretName) {
+        String[] found = new String[1];
         try (JsonParser json = JSON.createParser(body)) {
             if (json.nextToken() == JsonToken.START_OBJECT) {
-                while (json.nextToken() == JsonToken.FIELD_NAME) {
-                    String field = json.currentName();
-                    json.nextToken();
-                    if (name.equals(field) && json.currentToken() == JsonToken.VALUE_STRING) {
-                        return json.getText();
+                readObject(json, (field, value) -> {
+                    if (found[0] == null && name.equals(field) && value.currentToken() == JsonToken.VALUE_STRING) {
+                        found[0] = value.getText();
+                    } else {
+                        value.skipChildren();
                     }
-                    json.skipChildren();
-                }
+                });
             }
         } catch (IOException e) {
             throw new SecretManagerException("Cannot parse the response for secret '" + secretName + "'", e);
         }
-        throw new SecretManagerException("No " + name + " in the response for secret '" + secretName + "'");
+        if (found[0] == null) {
+            throw new SecretManagerException("No " + name + " in the response for secret '" + secretName + "'");
+        }
+        return found[0];
     }
 
     /**
