@@ -55,8 +55,8 @@ src/it/consumer/run.sh           # JPMS smoke test on the module path and the cl
   through `SecretManagerClient.create`, as an application does.
 - The Google provider's tests run against `FakeGoogle`, a local fake of the Secret Manager API and Google's token
   endpoint. `GoogleSecretManagerLiveTest` runs against a real project only when `SECRETS_GOOGLE_TEST_PROJECT` is set.
-- Pull requests run CI (build, tests, Javadoc, smoke test, SonarCloud) and an automated review. Merges to `master`
-  publish a SNAPSHOT.
+- Pull requests run CI (build, tests, Javadoc, smoke test, SonarCloud) and an automated review. Releases are
+  published to Maven Central by hand; SNAPSHOTs are not published.
 
 ## License
 

@@ -37,8 +37,8 @@ version.
 The BOM manages the secrets modules only. Third-party versions (google-auth, Jackson, dynamic-configuration) come
 through the modules' own dependencies.
 
-Releases are on Maven Central. Development versions (`-SNAPSHOT`) are published from `master` to the Central Portal
-snapshot repository, `https://central.sonatype.com/repository/maven-snapshots/`.
+Releases are on Maven Central. Development versions (`-SNAPSHOT`) are not published; to try an unreleased change,
+build it locally with `./mvnw install`.
 
 ## Modules
 
