@@ -1,6 +1,6 @@
 # Secret Manager Client
 
-[SecretManagerClient](https://github.com/descoped/secrets-client-api/blob/master/src/main/java/io/descoped/secrets/api/SecretManagerClient.java)
+[SecretManagerClient](secrets-client-api/src/main/java/io/descoped/secrets/api/SecretManagerClient.java)
 is a provider based API for reading secrets.
 
 ## Dependencies
@@ -35,6 +35,22 @@ Add `secrets-client-api` as a compile time dependency and choose the provider(s)
 <version>2.0.0</version>
     <scope>runtime</scope>
 </dependency>
+```
+
+From 3.0.0, all modules share one version, and `secrets-client-bom` aligns them:
+
+```xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>io.descoped.secrets</groupId>
+            <artifactId>secrets-client-bom</artifactId>
+            <version>${secrets-client.version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
 ```
 
 ## API
@@ -89,16 +105,16 @@ interface SecretManagerClient extends AutoCloseable {
 
 Please note: only use this provider for migration or test purposes
 
-Configuration for [Dynamic Configuration](https://github.com/descoped/secrets-provider-dynamic-configuration) provider:
+Configuration for [Dynamic Configuration](secrets-provider-dynamic-configuration) provider:
 
 Property                        | Description
 --------------------------------|----------------------------------------------
-secrets.provider                | dynamic-configuration (required)
+secrets.provider                | dynamic-secret-configuration (required)
 secrets.property-resource-path  | full filepath to property resource (required)
 
 ### Safe configuration
 
-Configuration for [Safe Configuration](https://github.com/descoped/secrets-provider-safe-configuration) provider:
+Configuration for [Safe Configuration](secrets-provider-safe-configuration) provider:
 
 Property                        | Description
 --------------------------------|----------------------------------------------
@@ -107,7 +123,7 @@ secrets.property-resource-path  | full filepath to property resource (required)
 
 ### Google Secret Manager
 
-Configuration for [Google Secret Manager](https://github.com/descoped/secrets-provider-google-secret-manager) provider:
+Configuration for [Google Secret Manager](secrets-provider-google-secret-manager) provider:
 
 Property                         | Description
 ---------------------------------|----------------------------------------------
@@ -140,5 +156,5 @@ try (SecretManagerClient client = SecretManagerClient.create(providerConfigurati
 ```
 
 Please refer
-to [SecretManagerTest](https://github.com/descoped/secrets-provider-google-rest-api/blob/master/src/test/java/io/descoped/secrets/google/secretmanager/restapi/GoogleSecretManagerRestApiTest.java)
+to [SecretManagerTest](secrets-provider-google-secret-manager/src/test/java/io/descoped/secrets/google/secretmanager/restapi/GoogleSecretManagerRestApiTest.java)
 for further details.
