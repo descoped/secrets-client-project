@@ -3,7 +3,7 @@
 All notable changes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/). All modules share one version.
 
-## [3.0.0] - Unreleased
+## [3.0.0] - 2026-11-17
 
 A breaking release: the four module repositories are now one, and every module is revised. The Maven coordinates
 are unchanged. See [Migrating from 2.x](docs/migrating-from-2.x.md).
@@ -53,4 +53,4 @@ are unchanged. See [Migrating from 2.x](docs/migrating-from-2.x.md).
 
 - Apache HttpClient 4, httpcore and commons-codec from the Google provider's dependencies (unused by google-auth).
 
-[3.0.0]: https://github.com/descoped/secrets-client-project/compare/secrets-client-api/2.0.3...HEAD
+[3.0.0]: https://github.com/descoped/secrets-client-project/compare/secrets-client-api/2.0.3...3.0.0
