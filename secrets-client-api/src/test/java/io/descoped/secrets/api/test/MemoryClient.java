@@ -45,5 +45,6 @@ final class MemoryClient implements SecretManagerClient {
 
     @Override
     public void close() {
+        // Nothing to release: the versions stay readable to the test after close.
     }
 }

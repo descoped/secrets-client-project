@@ -1,9 +1,9 @@
 name: CI
 
 # One job on JDK 17, the baseline: every build compiles with `release 17`, so the bytecode does not depend on the
-# JDK, and 17 is the oldest runtime users have. Pull requests: build, tests and Javadoc of every module, and the
-# JPMS consumer smoke test. Pushes to master and release tags add coverage and the SonarCloud analysis (not gating); master then publishes a
-# SNAPSHOT.
+# JDK, and 17 is the oldest runtime users have. Every run: build, tests and Javadoc of every module, and the JPMS
+# consumer smoke test. Pushes to master and release tags, and pull requests from this repository, add coverage and
+# the SonarCloud analysis (not gating; pull requests from forks get no token). master then publishes a SNAPSHOT.
 on:
   push:
     branches: [master]
@@ -41,11 +41,14 @@ jobs:
     name: Build (JDK 17)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Coverage and SonarCloud: pushes, and pull requests from this repository (a fork's gets no secrets).
+      ANALYSE: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # SonarCloud needs the history to attribute new code.
-          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
+          fetch-depth: ${{ env.ANALYSE == 'true' && '0' || '1' }}
           persist-credentials: false
 
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880  # v6.3.0
@@ -55,16 +58,17 @@ jobs:
           cache: maven
 
       - name: Build, test and Javadoc
-        if: github.event_name != 'push'
+        if: env.ANALYSE != 'true'
         run: ./mvnw --batch-mode --no-transfer-progress verify javadoc:javadoc
 
       - name: Build, test, Javadoc and coverage
-        if: github.event_name == 'push'
+        if: env.ANALYSE == 'true'
         run: ./mvnw --batch-mode --no-transfer-progress verify javadoc:javadoc -P coverage
 
       # Analysis only: a SonarCloud outage or token problem must not stop the SNAPSHOT, so this step does not gate.
+      # On a pull request the scanner reads the pull request number, branch and base from GitHub Actions itself.
       - name: SonarCloud
-        if: github.event_name == 'push'
+        if: env.ANALYSE == 'true'
         continue-on-error: true
         env:
           SONAR_TOKEN: ${{ secrets.SONARCLOUD_TOKEN }}
@@ -97,9 +101,11 @@ jobs:
             *)
               case "$subject" in
                 "[maven-release-plugin] prepare release "*)
-                  echo "::notice::release commit for $version; releases are published by hand, so no SNAPSHOT"; exit 0 ;;
+                  echo "::notice::release commit for $version; releases are published by hand, so no SNAPSHOT"
+                  exit 0 ;;
                 *)
                   echo "::error::master is at $version, not a SNAPSHOT, and this is not a release commit"; exit 1 ;;
               esac ;;
           esac
-          ./mvnw --batch-mode --no-transfer-progress --settings .github/maven-settings.xml deploy -P central -DskipTests
+          ./mvnw --batch-mode --no-transfer-progress --settings .github/maven-settings.xml \
+            deploy -P central -DskipTests

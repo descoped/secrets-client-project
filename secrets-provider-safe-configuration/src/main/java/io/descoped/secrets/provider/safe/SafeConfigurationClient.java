@@ -343,39 +343,52 @@ final class SafeConfigurationClient implements SecretManagerClient {
         int lineNumber = 0;
         while (pos < content.length) {
             lineNumber++;
-            int end = pos;
-            while (end < content.length && content[end] != '\n') {
-                end++;
-            }
+            int end = indexOf(content, (byte) '\n', pos, content.length);
             int contentEnd = end > pos && content[end - 1] == '\r' ? end - 1 : end;
             int next = end < content.length ? end + 1 : end;
-
-            int first = pos;
-            while (first < contentEnd && isBlank(content[first])) {
-                first++;
-            }
-            String key = null;
-            if (first < contentEnd && content[first] != '#') {
-                int eq = first;
-                while (eq < contentEnd && content[eq] != '=') {
-                    eq++;
-                }
-                if (eq == contentEnd) {
-                    throw new SecretManagerException(path + ": line " + lineNumber + " has no '='");
-                }
-                int keyEnd = eq;
-                while (keyEnd > first && isBlank(content[keyEnd - 1])) {
-                    keyEnd--;
-                }
-                if (keyEnd == first) {
-                    throw new SecretManagerException(path + ": line " + lineNumber + " has an empty key");
-                }
-                key = new String(content, first, keyEnd - first, StandardCharsets.UTF_8);
-                visitor.entry(key, Arrays.copyOfRange(content, eq + 1, contentEnd), lineNumber);
-            }
+            String key = entry(content, pos, contentEnd, lineNumber, visitor);
             visitor.line(pos, contentEnd, next, key);
             pos = next;
         }
+    }
+
+    /**
+     * The entry on bytes {@code [start, end)}, line {@code lineNumber}, handed to the visitor. Returns its key, or
+     * {@code null} for a blank or comment line.
+     */
+    private String entry(byte[] content, int start, int end, int lineNumber, LineVisitor visitor) {
+        int first = start;
+        while (first < end && isBlank(content[first])) {
+            first++;
+        }
+        if (first == end || content[first] == '#') {
+            return null;
+        }
+        int eq = indexOf(content, (byte) '=', first, end);
+        if (eq == end) {
+            throw new SecretManagerException(path + ": line " + lineNumber + " has no '='");
+        }
+        int keyEnd = eq;
+        while (keyEnd > first && isBlank(content[keyEnd - 1])) {
+            keyEnd--;
+        }
+        if (keyEnd == first) {
+            throw new SecretManagerException(path + ": line " + lineNumber + " has an empty key");
+        }
+        String key = new String(content, first, keyEnd - first, StandardCharsets.UTF_8);
+        visitor.entry(key, Arrays.copyOfRange(content, eq + 1, end), lineNumber);
+        return key;
+    }
+
+    /**
+     * The index of the first {@code b} in {@code [from, to)}, or {@code to}.
+     */
+    private static int indexOf(byte[] content, byte b, int from, int to) {
+        int i = from;
+        while (i < to && content[i] != b) {
+            i++;
+        }
+        return i;
     }
 
     private static boolean startsWith(byte[] content, byte[] prefix) {

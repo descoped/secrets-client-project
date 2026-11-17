@@ -122,12 +122,17 @@ class GoogleSecretManagerClientTest {
         google.on("GET", SECRETS + "/a/versions/latest:access",
                 FakeGoogle.error(403, "PERMISSION_DENIED", "Permission denied on secret"));
         google.on("GET", SECRETS + "/b/versions/latest:access", new Response(500, "hunter2 internal"));
+        google.on("GET", SECRETS + "/c/versions/latest:access", new Response(503,
+                "{\"error\":{\"status\":{\"code\":[1]},\"details\":[{}],\"message\":\"Try again\"}}"));
         try (SecretManagerClient client = open()) {
             SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("a"));
             assertEquals("Google Secret Manager returned HTTP 403 PERMISSION_DENIED when reading secret 'a':"
                     + " Permission denied on secret", e.getMessage());
             e = assertThrows(SecretManagerException.class, () -> client.readString("b"));
             assertEquals("Google Secret Manager returned HTTP 500 when reading secret 'b'", e.getMessage());
+            // A malformed error object: the unexpected structures are skipped and the message is still found.
+            e = assertThrows(SecretManagerException.class, () -> client.readString("c"));
+            assertEquals("Google Secret Manager returned HTTP 503 when reading secret 'c': Try again", e.getMessage());
         }
     }
 
@@ -227,7 +232,8 @@ class GoogleSecretManagerClientTest {
     void theEndpointMustUseHttpsExceptOnLoopback() throws IOException {
         for (String endpoint : List.of("http://secretmanager.googleapis.com", "http://10.0.0.1:8080", "ftp://host",
                 "http://localhost.evil.example", "https://")) {
-            assertThrows(IllegalArgumentException.class, () -> open(Map.of("secrets.endpoint", endpoint)), endpoint);
+            Map<String, String> configuration = Map.of("secrets.endpoint", endpoint);
+            assertThrows(IllegalArgumentException.class, () -> open(configuration), endpoint);
         }
         for (String endpoint : List.of("https://europe-north1-secretmanager.googleapis.com", "http://localhost:1",
                 "http://127.0.0.1:1", "http://[::1]:1")) {

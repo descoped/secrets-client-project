@@ -92,6 +92,7 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
      * Creates the initializer; called by {@link java.util.ServiceLoader}.
      */
     public GoogleSecretManagerClientInitializer() {
+        // No state: ServiceLoader needs a public no-argument constructor, the work is done in initialize.
     }
 
     @Override
