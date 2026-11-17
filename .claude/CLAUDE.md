@@ -19,8 +19,10 @@ true when behaviour changes.
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API, google-auth (Application Default Credentials), Jackson 3 `jackson-core` |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
-(old tags prefixed with the module name, e.g. `secrets-client-api/2.0.3`). The 3.0.0 revision is in progress: module
-and package names, the API and the providers change in it.
+(old tags prefixed with the module name, e.g. `secrets-client-api/2.0.3`). 3.0.0 (2026-11-17) is the first release
+from this repository, with new module and package names, a revised API and revised providers; `CHANGELOG.md` and
+`docs/migrating-from-2.x.md` describe the changes. From 3.0.0 on, versions follow semantic versioning: a breaking
+change to the API or to a provider's documented behaviour needs a new major version.
 
 ## Invariants (never violate)
 
@@ -39,9 +41,8 @@ and package names, the API and the providers change in it.
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and
   outdated code and configuration is removed, not carried along.
-- **No release before the 3.0.0 plan is complete** (owner's decision, 2026-11-17). SNAPSHOTs are fine; a release
-  (`release:prepare`/`release:perform`, an upload to the Central Portal) waits for the whole plan and the owner's
-  go-ahead.
+- **Releases only with the owner's go-ahead.** SNAPSHOTs are fine; a release (`release:prepare`/`release:perform`, an
+  upload to the Central Portal) is made by the owner or on his explicit word, and `CHANGELOG.md` gets its entry first.
 - **Publishing.** Merges to `master` publish SNAPSHOTs of every module to the Central Portal snapshot repository
   (`ci.yml`, step "Publish SNAPSHOT") with the secrets `CENTRAL_TOKEN_USER` / `CENTRAL_TOKEN_PASSWORD`; the step fails
   when they are missing. Releases go through the Central Portal (profiles `central,sign`), only with the owner's
