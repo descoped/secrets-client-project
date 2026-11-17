@@ -1,22 +1,16 @@
-import io.descoped.secrets.api.SecretManagerClientInitializer;
-
 /**
- * The Google Secret Manager secrets provider.
+ * The {@code google-secret-manager} secrets provider. See
+ * {@link io.descoped.secrets.provider.google.GoogleSecretManagerClientInitializer}.
  */
-module io.descoped.secrets.provider.google.rest.api {
-
-    requires java.net.http;
-
-    requires io.descoped.service.provider.api;
+module io.descoped.secrets.provider.google {
     requires transitive io.descoped.secrets.api;
-
+    requires java.net.http;
     requires com.google.auth;
     requires com.google.auth.oauth2;
-    requires com.fasterxml.jackson.databind;
+    requires com.fasterxml.jackson.core;
 
-    opens io.descoped.secrets.google.secretmanager.restapi to com.fasterxml.jackson.databind;
+    exports io.descoped.secrets.provider.google;
 
-    provides SecretManagerClientInitializer with io.descoped.secrets.google.secretmanager.restapi.GoogleSecretManagerClientInitializer;
-
-    exports io.descoped.secrets.google.secretmanager.restapi;
+    provides io.descoped.secrets.api.SecretManagerClientInitializer with
+            io.descoped.secrets.provider.google.GoogleSecretManagerClientInitializer;
 }

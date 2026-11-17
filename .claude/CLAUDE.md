@@ -15,7 +15,7 @@ and must stay true when behaviour changes.
 | `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, values kept as bytes, no logging |
 | `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | read-only, on `io.descoped.config:dynamic-configuration` 3.x, for tests and migration |
-| `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google.rest.api` | Google Secret Manager REST API with google-auth |
+| `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API, google-auth (Application Default Credentials), jackson-core |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
 (old tags prefixed with the module name, e.g. `secrets-client-api/2.0.3`). The 3.0.0 revision is in progress: module
@@ -52,9 +52,14 @@ and package names, the API and the providers change in it.
 ## Testing
 
 - JUnit 6. Tests must not touch fixed paths such as `/tmp/...`; use `@TempDir`.
-- The Google Secret Manager tests that call Google need a service account and are not run in CI.
-- The test sources still sit in the modules' own packages; the root POM relaxes `-Xlint:exports` and
-  `missing-explicit-ctor` for test compilation only until they move to test modules of their own.
+- The Google Secret Manager tests run against `FakeGoogle`, a local server that also issues OAuth tokens for a
+  generated service-account key. `GoogleSecretManagerLiveTest` calls Google only when `SECRETS_GOOGLE_TEST_PROJECT`
+  is set; it is not run in CI.
+- Each module's tests are a named module of their own, `<module>.test` (`src/test/java/module-info.java`), in package
+  `<package>.test`. They require `io.descoped.secrets.api` and reach a provider only through
+  `SecretManagerClient.create` and `ServiceLoader`, as an application does (the API module's `uses` resolves the
+  provider module). Never put tests in a module's own package (a split package) or test providers in
+  `META-INF/services` (a named module ignores it).
 
 ## Maven Wrapper
 
