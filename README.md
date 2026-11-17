@@ -146,15 +146,20 @@ secrets.provider                 | google-secret-manager (required)
 secrets.project-id               | the Google Cloud project id or number (required)
 secrets.service-account-key-path | a service-account JSON key file. Without it, Application Default Credentials are used: Workload Identity, the metadata server, `GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`. **Do not use key files on a cluster.**
 secrets.replication-locations    | comma-separated locations, such as `europe-north1`, for secrets that `addVersion` creates (user-managed replication); automatic replication when absent
-secrets.endpoint                 | the API endpoint, default `https://secretmanager.googleapis.com` (for example a regional endpoint)
+secrets.endpoint                 | the API endpoint, default `https://secretmanager.googleapis.com` (for example a regional endpoint); https only, plain http only for a loopback address
 secrets.connect-timeout          | ISO-8601 duration, default `PT10S`
 secrets.request-timeout          | ISO-8601 duration, default `PT30S`
 
 - The access token is taken from the credentials on every request, so google-auth refreshes it before it expires.
 - Versions are Secret Manager's: `latest` or a version number. `addVersion` returns the new number, and creates the
   secret first if it does not exist.
-- Secret names must follow Secret Manager's rule (1 to 255 letters, digits, `-` and `_`); other names are rejected
-  before any request.
+- Secret names follow Secret Manager's rule (1 to 255 letters, digits, `-` and `_`). Reading another name or an
+  invalid version is `SecretNotFoundException`, `addVersion` with another name a `SecretManagerException`; neither
+  sends a request.
+- A disabled or destroyed version exists, so reading it is a `SecretManagerException` (`FAILED_PRECONDITION`), not
+  `SecretNotFoundException`.
+- `secrets.service-account-key-path` must be a service-account key; other credential files (such as
+  `external_account`) are refused.
 - Values travel as bytes with a CRC32C checksum both ways, and a mismatch is an error.
 - Error messages carry the HTTP status and Google's error status and message, never the response body.
 

@@ -68,9 +68,9 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
     public byte[] readBytes(String secretName, String secretVersion) {
         Objects.requireNonNull(secretName, "secretName");
         Session current = open();
-        checkName(secretName);
         String version = secretVersion == null ? "latest" : secretVersion;
-        if (!VERSION_ID.matcher(version).matches()) {
+        // A name or version Secret Manager cannot hold does not exist; no request is sent for it.
+        if (!SECRET_ID.matcher(secretName).matches() || !VERSION_ID.matcher(version).matches()) {
             throw new SecretNotFoundException(secretName, secretVersion);
         }
         HttpResponse<byte[]> response = send(current, request(

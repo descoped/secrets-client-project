@@ -150,9 +150,11 @@ class GoogleSecretManagerClientTest {
     @Test
     void invalidNamesAreRejectedBeforeAnyRequest() throws IOException {
         try (SecretManagerClient client = open()) {
-            for (String name : List.of("", "a/b", "../a", "a b", "a%2Fb", "x".repeat(256))) {
-                assertThrows(SecretManagerException.class, () -> client.readString(name), name);
-                assertThrows(SecretManagerException.class, () -> client.addVersion(name, "1"), name);
+            for (String name : List.of("", "a/b", "../a", "a b", "a%2Fb", "db.password", "x".repeat(256))) {
+                assertThrows(SecretNotFoundException.class, () -> client.readString(name), name);
+                SecretManagerException e = assertThrows(SecretManagerException.class,
+                        () -> client.addVersion(name, "1"), name);
+                assertFalse(e instanceof SecretNotFoundException, name);
             }
         }
         assertTrue(google.requests.isEmpty());
@@ -222,6 +224,29 @@ class GoogleSecretManagerClientTest {
     }
 
     @Test
+    void theEndpointMustUseHttpsExceptOnLoopback() throws IOException {
+        for (String endpoint : List.of("http://secretmanager.googleapis.com", "http://10.0.0.1:8080", "ftp://host",
+                "http://localhost.evil.example", "https://")) {
+            assertThrows(IllegalArgumentException.class, () -> open(Map.of("secrets.endpoint", endpoint)), endpoint);
+        }
+        for (String endpoint : List.of("https://europe-north1-secretmanager.googleapis.com", "http://localhost:1",
+                "http://127.0.0.1:1", "http://[::1]:1")) {
+            open(Map.of("secrets.endpoint", endpoint)).close();
+        }
+    }
+
+    @Test
+    void theKeyFileMustBeAServiceAccountKey() throws IOException {
+        java.nio.file.Path external = dir.resolve("external.json");
+        java.nio.file.Files.writeString(external, "{\"type\":\"external_account\",\"audience\":\"a\","
+                + "\"subject_token_type\":\"t\",\"token_url\":\"https://sts.googleapis.com/v1/token\","
+                + "\"credential_source\":{\"executable\":{\"command\":\"/bin/echo\"}}}");
+        Map<String, String> configuration = Map.of("secrets.provider", "google-secret-manager",
+                "secrets.project-id", "p", "secrets.service-account-key-path", external.toString());
+        assertThrows(SecretManagerException.class, () -> SecretManagerClient.create(configuration));
+    }
+
+    @Test
     void configurationIsChecked() throws IOException {
         Path key = google.serviceAccountKey(dir);
         Map<String, String> base = Map.of("secrets.provider", "google-secret-manager",
@@ -233,6 +258,10 @@ class GoogleSecretManagerClientTest {
         Map<String, String> badTimeout = new HashMap<>(base);
         badTimeout.put("secrets.project-id", "p");
         badTimeout.put("secrets.request-timeout", "30");
+        assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(badTimeout));
+        badTimeout.put("secrets.request-timeout", "PT0S");
+        assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(badTimeout));
+        badTimeout.put("secrets.request-timeout", "-PT1S");
         assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(badTimeout));
         Map<String, String> missingKey = new HashMap<>(base);
         missingKey.put("secrets.project-id", "p");
