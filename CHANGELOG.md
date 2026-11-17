@@ -19,8 +19,10 @@ are unchanged. See [Migrating from 2.x](docs/migrating-from-2.x.md).
 - `service-provider-api` 3.x: providers are named with `@ProviderName`.
 - dynamic-configuration provider: renamed `dynamic-configuration` (was `dynamic-secret-configuration`), read-only, on
   dynamic-configuration 3.x, reading a properties file, a directory of secret files and inline values.
-- Google provider: Application Default Credentials (was Compute Engine or a key file); new secrets get automatic
-  replication unless `secrets.replication-locations` is set (was always `europe-north1`); Jackson 3.
+- Google provider: Application Default Credentials when `secrets.service-account-key-path` is not set (was Compute
+  Engine only); the key file must be a service-account key, and other credential files (such as
+  `external_account`) are refused. New secrets get automatic replication unless `secrets.replication-locations` is
+  set (was always `europe-north1`). Jackson 3.
 - Provider implementation classes are package-private; only the initializers are public.
 
 ### Added

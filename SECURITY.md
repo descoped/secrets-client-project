@@ -20,8 +20,8 @@ Anything that breaks the library's promises about secrets, for example:
 - a secret left in memory that the library says it wipes, or an array the caller owns that the library keeps or
   changes;
 - a secret file written with wider permissions than documented, or not replaced atomically;
-- a request to Google sent anywhere other than the configured https endpoint, or a credential loaded from something
-  other than what the configuration names;
+- a request to Google sent anywhere other than the configured endpoint, or over plain http to anything but a
+  loopback address, or a credential loaded from something other than what the configuration names;
 - a vulnerability in a dependency that is reachable through this library.
 
 ## Supported versions
