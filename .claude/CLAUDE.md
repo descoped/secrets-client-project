@@ -5,8 +5,9 @@ Guidance for Claude Code in this repository.
 ## What this is
 
 The Descoped secrets client: `SecretManagerClient`, a provider based API for reading and writing secrets, and its
-providers. One Maven reactor, group `io.descoped.secrets`, owned by Descoped. `README.md` is the user documentation
-and must stay true when behaviour changes.
+providers. One Maven reactor, group `io.descoped.secrets`, owned by Descoped. `README.md` is the short
+introduction (what it is, how it works, working with the code); `docs/` is the user documentation. Both must stay
+true when behaviour changes.
 
 | Module | JPMS module | Role |
 |---|---|---|

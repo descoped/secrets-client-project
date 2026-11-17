@@ -35,8 +35,9 @@ import java.util.regex.Pattern;
  *     {@code gcloud auth application-default login}). Do not use key files on a cluster.</td></tr>
  *     <tr><td>{@value #REPLICATION_KEY}</td><td>comma-separated locations, such as {@code europe-north1}, for secrets
  *     that {@code addVersion} creates (user-managed replication); automatic replication when absent</td></tr>
- *     <tr><td>{@value #ENDPOINT_KEY}</td><td>the API endpoint, default {@value #DEFAULT_ENDPOINT}; for example a
- *     regional endpoint. It must use https; plain http only for a loopback address.</td></tr>
+ *     <tr><td>{@value #ENDPOINT_KEY}</td><td>the API endpoint, default {@value #DEFAULT_ENDPOINT}; another host
+ *     serving the same global API, such as a Private Service Connect endpoint or a test server. Regional secrets
+ *     ({@code locations/*}) are not supported. It must use https; plain http only for a loopback address.</td></tr>
  *     <tr><td>{@value #CONNECT_TIMEOUT_KEY}</td><td>ISO-8601 duration, default {@code PT10S}</td></tr>
  *     <tr><td>{@value #REQUEST_TIMEOUT_KEY}</td><td>ISO-8601 duration, default {@code PT30S}</td></tr>
  * </table>
