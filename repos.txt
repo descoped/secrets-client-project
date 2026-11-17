@@ -1,4 +1,0 @@
-secrets-client-api
-secrets-provider-dynamic-configuration
-secrets-provider-safe-configuration
-secrets-provider-google-secret-manager
