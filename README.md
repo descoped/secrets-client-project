@@ -1,43 +1,23 @@
-# Secret Manager Client
+# Secrets Client
 
-[SecretManagerClient](secrets-client-api/src/main/java/io/descoped/secrets/api/SecretManagerClient.java)
-is a provider based API for reading secrets.
+[![CI](https://github.com/descoped/secrets-client-project/actions/workflows/ci.yml/badge.svg)](https://github.com/descoped/secrets-client-project/actions/workflows/ci.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=descoped_secrets-client-project&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=descoped_secrets-client-project)
+
+[SecretManagerClient](secrets-client-api/src/main/java/io/descoped/secrets/api/SecretManagerClient.java) is a
+provider based API for reading and writing secrets, with providers for a local file, dynamic-configuration and Google
+Secret Manager. Java 17 or later, on the module path or the class path.
+
+Module | JPMS module | What it is
+---|---|---
+`secrets-client-api` | `io.descoped.secrets.api` | the API; compile against this
+`secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | secrets in a local file, held as bytes
+`secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | read-only, for tests and migration
+`secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager
+`secrets-client-bom` | | aligns the versions of the modules above
 
 ## Dependencies
 
-Add `secrets-client-api` as a compile time dependency and choose the provider(s) you want to use.
-
-```xml
-<dependency>
-    <groupId>io.descoped.secrets</groupId>
-    <artifactId>secrets-client-api</artifactId>
-    <version>2.0.0</version>
-</dependency>
-
-<dependency>
-<groupId>io.descoped.secrets</groupId>
-<artifactId>secrets-provider-safe-configuration</artifactId>
-<version>2.0.0</version>
-    <scope>runtime</scope>
-</dependency>
-
-<dependency>
-<groupId>io.descoped.secrets</groupId>
-<artifactId>secrets-provider-google-secret-manager</artifactId>
-<version>2.0.0</version>
-    <scope>runtime</scope>
-</dependency>
-
-<!-- dynamic-configuration holds values as strings: for tests and migration only -->
-<dependency>
-<groupId>io.descoped.secrets</groupId>
-<artifactId>secrets-provider-dynamic-configuration</artifactId>
-<version>2.0.0</version>
-    <scope>runtime</scope>
-</dependency>
-```
-
-From 3.0.0, all modules share one version, and `secrets-client-bom` aligns them:
+All modules share one version. Import the BOM, compile against the API and add the providers you use at runtime:
 
 ```xml
 <dependencyManagement>
@@ -45,13 +25,36 @@ From 3.0.0, all modules share one version, and `secrets-client-bom` aligns them:
         <dependency>
             <groupId>io.descoped.secrets</groupId>
             <artifactId>secrets-client-bom</artifactId>
-            <version>${secrets-client.version}</version>
+            <version>3.0.0</version>
             <type>pom</type>
             <scope>import</scope>
         </dependency>
     </dependencies>
 </dependencyManagement>
+
+<dependencies>
+    <dependency>
+        <groupId>io.descoped.secrets</groupId>
+        <artifactId>secrets-client-api</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>io.descoped.secrets</groupId>
+        <artifactId>secrets-provider-safe-configuration</artifactId>
+        <scope>runtime</scope>
+    </dependency>
+    <dependency>
+        <groupId>io.descoped.secrets</groupId>
+        <artifactId>secrets-provider-google-secret-manager</artifactId>
+        <scope>runtime</scope>
+    </dependency>
+</dependencies>
 ```
+
+3.0.0 is not released yet. Until then, `3.0.0-SNAPSHOT` is published from `master` to the Central Portal snapshot
+repository, `https://central.sonatype.com/repository/maven-snapshots/`.
+
+An application module `requires io.descoped.secrets.api` only. Provider modules on the module path are found without
+being required: the API module declares `uses` for the provider service.
 
 ## API
 
@@ -83,9 +86,6 @@ Every provider follows the same contract:
   a reference to them, nor to an array passed to `addVersion`.
 - A read-only provider throws `UnsupportedOperationException` from `addVersion`.
 - After `close()`, every other method throws `IllegalStateException`.
-
-The JPMS module is `io.descoped.secrets.api`. It declares `uses` for the provider service, so provider modules on the
-module path are found without the application requiring them.
 
 ## Supported providers
 
@@ -183,3 +183,38 @@ try (SecretManagerClient client = SecretManagerClient.create(configuration)) {
 The provider tests run against a local fake of Google. A live test,
 [GoogleSecretManagerLiveTest](secrets-provider-google-secret-manager/src/test/java/io/descoped/secrets/provider/google/test/GoogleSecretManagerLiveTest.java),
 runs when `SECRETS_GOOGLE_TEST_PROJECT` names a project.
+
+## Migrating from 2.x
+
+3.0.0 is a breaking release. The Maven coordinates are unchanged.
+
+What changed | 2.x | 3.0
+---|---|---
+Java | 11 | 17
+API module | `io.descoped.secrets.client.api` | `io.descoped.secrets.api` (package unchanged)
+safe-configuration | package `io.descoped.secrets.secure.configuration` | module and package `io.descoped.secrets.provider.safe`
+dynamic-configuration | provider `dynamic-secret-configuration`, package `io.descoped.secrets.dynamic.configuration` | provider `dynamic-configuration`, module and package `io.descoped.secrets.provider.dynamic`
+google-secret-manager | module `io.descoped.secrets.provider.google.rest.api`, package `...google.secretmanager.restapi` | module and package `io.descoped.secrets.provider.google`
+Missing secret or version | `null` (safe, dynamic) or `RuntimeException` (Google) | `SecretNotFoundException`
+Other failures | `RuntimeException` | `SecretManagerException`
+Returned arrays | safe-configuration returned its own array | always a new array the caller owns
+`safeCharArrayAsUTF8(bytes)` | static helper | `readChars(name)`
+dynamic-configuration | read and write, Base64 in the file | read-only; file, secret directory or inline values
+dynamic-configuration library | 2.x | 3.x
+Google credentials | Compute Engine or a key file | Application Default Credentials or a key file
+Google replication of new secrets | `europe-north1` | automatic, or `secrets.replication-locations`
+Provider implementation classes | public | package-private; only the initializers are public
+`service-provider-api` | 2.x | 3.x (`providerId()` is gone; the `@ProviderName` annotation names a provider)
+
+safe-configuration files written by 2.x `addVersion` went through `java.util.Properties.store(OutputStream, ..)`,
+which escapes values: `\\` for `\`, `\=`, `\:`, `\#`, `\!`, `\t`, `\n`, `\r`, `\f`, `\ ` for a leading space, and
+`\uXXXX` for every character outside ISO-8859-1 (for example `https\://host`, `bl\u00E5`). 3.0 reads values verbatim,
+so undo every one of these escapes once, in every line of such a file.
+
+## Building
+
+```sh
+./mvnw verify                    # compile with -Xlint:all -Werror, tests (JUnit 6)
+./mvnw verify javadoc:javadoc    # plus Javadoc with doclint, warnings fail the build
+src/it/consumer/run.sh           # JPMS smoke test: an application module on the module path and the class path
+```

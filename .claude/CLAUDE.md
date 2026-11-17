@@ -73,6 +73,9 @@ and package names, the API and the providers change in it.
 ```sh
 ./mvnw verify                    # compile with -Xlint:all -Werror, tests (JUnit 6)
 ./mvnw verify javadoc:javadoc    # plus Javadoc with doclint, warnings fail the build
+src/it/consumer/run.sh           # JPMS smoke test: an application that requires only the API, against every
+                                 # provider, on the module path (Google's dependencies as automatic modules) and
+                                 # the class path; jdeps --check on the modules with named dependencies only
 ./mvnw verify -P coverage        # JaCoCo report per module in <module>/target/site/jacoco
 ./mvnw deploy -P central,secrets # SNAPSHOT to the Central Portal by hand (the token comes from ~/.mavenrc;
                                  # ~/.m2/settings.xml lists https://central.sonatype.com in repositoryOrigins)
