@@ -14,16 +14,6 @@
       "automerge": true
     },
     {
-      "description": "Held on 2.x until the dynamic-configuration provider moves to its 3.x API; the hold is removed then",
-      "matchManagers": [
-        "maven"
-      ],
-      "matchPackageNames": [
-        "io.descoped.config:dynamic-configuration"
-      ],
-      "allowedVersions": "<3"
-    },
-    {
       "description": "JDK versions in the workflows are deliberate: CI and `respond` build on the Java 17 baseline. They are changed by hand, never bumped.",
       "matchManagers": [
         "github-actions"

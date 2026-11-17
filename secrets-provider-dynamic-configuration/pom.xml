@@ -13,7 +13,7 @@
     <packaging>jar</packaging>
 
     <name>Secrets Provider Dynamic Configuration</name>
-    <description>SecretManagerClient provider backed by dynamic-configuration, for tests and migration.</description>
+    <description>Read-only SecretManagerClient provider backed by dynamic-configuration, for tests and migration.</description>
 
     <dependencies>
         <dependency>
@@ -26,12 +26,6 @@
             <groupId>io.descoped.config</groupId>
             <artifactId>dynamic-configuration</artifactId>
             <version>${dynamic-configuration.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-            <version>${slf4j.version}</version>
         </dependency>
 
         <dependency>
