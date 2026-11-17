@@ -102,12 +102,27 @@ secrets.property-resource-path  | full filepath to property resource (required)
 
 ### Safe configuration
 
-Configuration for [Safe Configuration](secrets-provider-safe-configuration) provider:
+Secrets in a local file, held in memory as bytes and wiped on `close()`. JPMS module
+`io.descoped.secrets.provider.safe`.
 
 Property                        | Description
 --------------------------------|----------------------------------------------
 secrets.provider                | safe-configuration (required)
-secrets.property-resource-path  | full filepath to property resource (required)
+secrets.property-resource-path  | path of the secrets file (required)
+
+File format:
+
+- UTF-8 (a leading byte-order mark is skipped), lines end with LF or CRLF.
+- One `key=value` per line. The first `=` separates key and value; the key is trimmed, the value is taken byte for
+  byte, including surrounding whitespace and further `=`. There are no escapes, so a value cannot contain a line break.
+- Blank lines and lines whose first non-blank character is `#` are ignored.
+- A line without `=`, an empty key and a duplicate key are errors, reported with the line number (never the value).
+- This is not the `java.util.Properties` format: `\`, `:` and `!` have no special meaning.
+
+The file is read once, when the client is created. The only version is `latest`. `addVersion` replaces the key's line
+in place, or appends one, and keeps every other line, comment and line ending. The file is replaced atomically by a
+new file that only its owner can read and write (on file systems with POSIX permissions); an unwritable file is a
+`SecretManagerException`.
 
 ### Google Secret Manager
 
