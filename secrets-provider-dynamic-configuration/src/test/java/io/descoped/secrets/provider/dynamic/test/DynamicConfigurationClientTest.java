@@ -97,7 +97,27 @@ class DynamicConfigurationClientTest {
         Files.writeString(file, "a=hunter2${missing}\n");
         SecretManagerException e = assertThrows(SecretManagerException.class,
                 () -> open(Map.of("secrets.property-resource-path", file.toString())));
-        assertFalse(e.getMessage().contains("hunter2"));
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            assertFalse(String.valueOf(t.getMessage()).contains("hunter2"), t.toString());
+        }
+    }
+
+    @Test
+    void readsAKubernetesSecretVolume() throws IOException {
+        // A mounted secret: the files are symbolic links through ..data to a timestamped directory.
+        Path volume = Files.createDirectory(dir.resolve("volume"));
+        Path data = Files.createDirectory(volume.resolve("..2026_11_17_12_00_00.000000001"));
+        Files.writeString(data.resolve("db.password"), "s3cret\r\n");
+        try {
+            Files.createSymbolicLink(volume.resolve("..data"), data.getFileName());
+            Files.createSymbolicLink(volume.resolve("db.password"), Path.of("..data", "db.password"));
+        } catch (UnsupportedOperationException | IOException e) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "symbolic links are not supported here");
+        }
+        try (SecretManagerClient client = open(Map.of("secrets.directory", volume.toString()))) {
+            assertEquals("s3cret", client.readString("db.password"), "one trailing CRLF is removed");
+            assertThrows(SecretNotFoundException.class, () -> client.readString("..data"));
+        }
     }
 
     @Test

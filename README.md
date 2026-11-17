@@ -104,8 +104,9 @@ secrets.values.&lt;name&gt;     | a secret given inline, for tests
 
 At least one source is required. They are layered in that order, a later one overriding an earlier one. The
 properties file follows dynamic-configuration's rules: `java.util.Properties` escapes, and `${key}` references between
-values (`$${` for a literal `${`). Values from the directory are taken literally. The sources are read once, when the
-client is created. The only version is `latest`; `addVersion` throws `UnsupportedOperationException`.
+values (`$${` for a literal `${`). Values from the directory are taken literally, except that one trailing LF or CRLF
+is removed; hidden entries, such as Kubernetes' `..data`, are skipped. The sources are read once, when the client is
+created. The only version is `latest`; `addVersion` throws `UnsupportedOperationException`.
 
 ### Safe configuration
 

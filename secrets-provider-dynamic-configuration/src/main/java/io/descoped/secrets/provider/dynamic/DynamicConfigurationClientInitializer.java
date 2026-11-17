@@ -29,7 +29,8 @@ import java.util.Map;
  *
  * <p>The sources are layered in that order, a later one overriding an earlier one. The properties file follows
  * dynamic-configuration's rules: {@link java.util.Properties} escapes, and {@code ${key}} references between values
- * (<code>$${</code> for a literal <code>${</code>). Values from the directory are taken literally. The sources are read once,
+ * (<code>$${</code> for a literal <code>${</code>). Values from the directory are taken literally, except that one
+ * trailing LF or CRLF is removed; hidden entries, such as Kubernetes' {@code ..data}, are skipped. The sources are read once,
  * when the client is created. The only version is {@code latest}; {@code addVersion} throws
  * {@link UnsupportedOperationException}.
  */
