@@ -144,7 +144,7 @@ public class SafeConfigurationClient implements SecretManagerClient {
     @Override
     public String addVersion(String secretName, byte[] secretValue) {
         if (closed.get()) {
-            throw new IllegalStateException("Client is closed!");
+            throw new IllegalStateException("Client is closed");
         }
         Objects.requireNonNull(secretName, "secretName");
         Objects.requireNonNull(secretValue, "secretValue");
@@ -175,11 +175,11 @@ public class SafeConfigurationClient implements SecretManagerClient {
     @Override
     public byte[] readBytes(String secretName, String secretVersion) {
         if (closed.get()) {
-            throw new IllegalStateException("Client is closed!");
+            throw new IllegalStateException("Client is closed");
         }
         Objects.requireNonNull(secretName, "secretName");
         byte[] value = secureMap.get(secretName);
-        if (value == null) {
+        if (value == null || !(secretVersion == null || "latest".equals(secretVersion))) {
             throw new SecretNotFoundException(secretName, secretVersion);
         }
         return value.clone();

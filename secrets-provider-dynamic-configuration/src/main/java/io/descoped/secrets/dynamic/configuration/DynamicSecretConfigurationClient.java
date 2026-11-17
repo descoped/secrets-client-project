@@ -63,7 +63,11 @@ public class DynamicSecretConfigurationClient implements SecretManagerClient {
         if (closed.get()) {
             throw new IllegalStateException("Client is closed");
         }
-        return ofNullable(map.get(Objects.requireNonNull(secretName, "secretName")))
+        Objects.requireNonNull(secretName, "secretName");
+        if (!(secretVersion == null || "latest".equals(secretVersion))) {
+            throw new SecretNotFoundException(secretName, secretVersion);
+        }
+        return ofNullable(map.get(secretName))
                 .map(s -> Base64.getDecoder().decode(s))
                 .orElseThrow(() -> new SecretNotFoundException(secretName, secretVersion));
     }

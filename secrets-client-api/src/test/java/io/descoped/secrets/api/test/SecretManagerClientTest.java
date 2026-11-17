@@ -137,6 +137,17 @@ class SecretManagerClientTest {
     }
 
     @Test
+    void anUnpairedSurrogateIsRejectedNotReplaced() {
+        try (MemoryClient client = memory()) {
+            SecretManagerException e = assertThrows(SecretManagerException.class,
+                    () -> client.addVersion("bad", "ab\uD800"));
+            assertTrue(e.getMessage().contains("'bad'"));
+            assertThrows(SecretManagerException.class, () -> client.addVersion("bad", new char[]{'a', '\uDC00'}));
+            assertTrue(client.received.isEmpty());
+        }
+    }
+
+    @Test
     void aMissingSecretOrVersionThrowsSecretNotFound() {
         try (MemoryClient client = memory()) {
             SecretNotFoundException e = assertThrows(SecretNotFoundException.class, () -> client.readString("missing"));

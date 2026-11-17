@@ -43,4 +43,19 @@ public class SecretManagerTest {
             assertArrayEquals("42".getBytes(), client.readBytes("AN_ANSWER"));
         }
     }
+
+    @Test
+    public void onlyTheLatestVersionExists() {
+        final Map<String, String> providerConfiguration = Map.of(
+                "secrets.provider", "dynamic-secret-configuration",
+                "secrets.property-resource-path", "application-secret.properties"
+        );
+        try (SecretManagerClient client = SecretManagerClient.create(providerConfiguration)) {
+            assertEquals("42", client.readString("AN_ANSWER", "latest"));
+            org.junit.jupiter.api.Assertions.assertThrows(io.descoped.secrets.api.SecretNotFoundException.class,
+                    () -> client.readBytes("AN_ANSWER", "7"));
+            org.junit.jupiter.api.Assertions.assertThrows(io.descoped.secrets.api.SecretNotFoundException.class,
+                    () -> client.readBytes("missing"));
+        }
+    }
 }

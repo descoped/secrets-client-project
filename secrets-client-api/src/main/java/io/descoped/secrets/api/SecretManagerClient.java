@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -166,19 +167,27 @@ public interface SecretManagerClient extends AutoCloseable {
     String addVersion(String secretName, byte[] secretValue);
 
     /**
-     * Adds a new version of a secret from UTF-8 characters. The intermediate bytes are wiped.
+     * Adds a new version of a secret from characters, encoded as UTF-8. The intermediate bytes are wiped.
      *
      * @param secretName  the name of the secret
      * @param secretValue the value of the new version
      * @return the id of the new version
-     * @throws SecretManagerException        if the version cannot be added
+     * @throws SecretManagerException        if the version cannot be added, or the value has an unpaired surrogate
      * @throws UnsupportedOperationException if the provider is read-only
      * @throws IllegalStateException         if the client is closed
      * @throws NullPointerException          if an argument is {@code null}
      */
     default String addVersion(String secretName, char[] secretValue) {
         Objects.requireNonNull(secretValue, "secretValue");
-        ByteBuffer encoded = StandardCharsets.UTF_8.encode(CharBuffer.wrap(secretValue));
+        ByteBuffer encoded;
+        try {
+            encoded = StandardCharsets.UTF_8.newEncoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .encode(CharBuffer.wrap(secretValue));
+        } catch (CharacterCodingException e) {
+            throw new SecretManagerException("The value for secret '" + secretName + "' is not valid UTF-16", e);
+        }
         byte[] bytes = new byte[encoded.remaining()];
         encoded.get(bytes);
         wipe(encoded);
@@ -195,18 +204,18 @@ public interface SecretManagerClient extends AutoCloseable {
      * @param secretName  the name of the secret
      * @param secretValue the value of the new version
      * @return the id of the new version
-     * @throws SecretManagerException        if the version cannot be added
+     * @throws SecretManagerException        if the version cannot be added, or the value has an unpaired surrogate
      * @throws UnsupportedOperationException if the provider is read-only
      * @throws IllegalStateException         if the client is closed
      * @throws NullPointerException          if an argument is {@code null}
      */
     default String addVersion(String secretName, String secretValue) {
         Objects.requireNonNull(secretValue, "secretValue");
-        byte[] bytes = secretValue.getBytes(StandardCharsets.UTF_8);
+        char[] chars = secretValue.toCharArray();
         try {
-            return addVersion(secretName, bytes);
+            return addVersion(secretName, chars);
         } finally {
-            Arrays.fill(bytes, (byte) 0);
+            Arrays.fill(chars, '\0');
         }
     }
 
@@ -258,7 +267,7 @@ public interface SecretManagerClient extends AutoCloseable {
         }
     }
 
-    private static void check(java.nio.charset.CoderResult result) throws CharacterCodingException {
+    private static void check(CoderResult result) throws CharacterCodingException {
         if (result.isError()) {
             result.throwException();
         }
