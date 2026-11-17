@@ -28,7 +28,7 @@ Add `secrets-client-api` as a compile time dependency and choose the provider(s)
     <scope>runtime</scope>
 </dependency>
 
-<!-- dynamic-configuration is unsafe and should only be used for migration or test purposes -->
+<!-- dynamic-configuration holds values as strings: for tests and migration only -->
 <dependency>
 <groupId>io.descoped.secrets</groupId>
 <artifactId>secrets-provider-dynamic-configuration</artifactId>
@@ -91,14 +91,22 @@ module path are found without the application requiring them.
 
 ### Dynamic configuration
 
-Please note: only use this provider for migration or test purposes
-
-Configuration for [Dynamic Configuration](secrets-provider-dynamic-configuration) provider:
+**For tests and migration only:** values are held as strings, which cannot be wiped. Read-only secrets from
+[dynamic-configuration](https://github.com/descoped/dynamic-configuration). JPMS module
+`io.descoped.secrets.provider.dynamic`.
 
 Property                        | Description
 --------------------------------|----------------------------------------------
-secrets.provider                | dynamic-secret-configuration (required)
-secrets.property-resource-path  | full filepath to property resource (required)
+secrets.provider                | dynamic-configuration (required)
+secrets.property-resource-path  | a properties file, which must exist
+secrets.directory               | a directory of secret files, one file per secret (Kubernetes secret volumes, Docker secrets), which must exist
+secrets.values.&lt;name&gt;     | a secret given inline, for tests
+
+At least one source is required. They are layered in that order, a later one overriding an earlier one. The
+properties file follows dynamic-configuration's rules: `java.util.Properties` escapes, and `${key}` references between
+values (`$${` for a literal `${`). Values from the directory are taken literally, except that one trailing LF or CRLF
+is removed; hidden entries, such as Kubernetes' `..data`, are skipped. The sources are read once, when the client is
+created. The only version is `latest`; `addVersion` throws `UnsupportedOperationException`.
 
 ### Safe configuration
 

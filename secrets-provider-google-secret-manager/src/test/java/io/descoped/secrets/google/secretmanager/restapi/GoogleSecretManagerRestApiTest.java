@@ -1,7 +1,6 @@
 package io.descoped.secrets.google.secretmanager.restapi;
 
 import io.descoped.config.DynamicConfiguration;
-import io.descoped.config.StoreBasedDynamicConfiguration;
 import io.descoped.secrets.api.SecretManagerClient;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
@@ -19,8 +18,8 @@ public class GoogleSecretManagerRestApiTest {
     @Disabled
     @Test
     public void readGoogleSecret() {
-        DynamicConfiguration configuration = new StoreBasedDynamicConfiguration.Builder()
-                .propertiesResource("application-override.properties")
+        DynamicConfiguration configuration = DynamicConfiguration.builder()
+                .file(Paths.get("application-override.properties"))
                 .build();
 
         Map<String, String> providerConfiguration = Map.of(
@@ -36,7 +35,7 @@ public class GoogleSecretManagerRestApiTest {
     }
 
     String getServiceAccountFile(DynamicConfiguration configuration) {
-        String path = configuration.evaluateToString("gcp.service-account.file");
+        String path = configuration.find("gcp.service-account.file").orElse(null);
         if (path == null || !Files.isReadable(Paths.get(path))) {
             throw new RuntimeException("Missing 'application-override.properties'-file with required property 'gcp.service-account.file'");
         }
@@ -46,8 +45,8 @@ public class GoogleSecretManagerRestApiTest {
     @Disabled
     @Test
     public void writeThenReadSecret() {
-        DynamicConfiguration configuration = new StoreBasedDynamicConfiguration.Builder()
-                .propertiesResource("application-override.properties")
+        DynamicConfiguration configuration = DynamicConfiguration.builder()
+                .file(Paths.get("application-override.properties"))
                 .build();
 
         Map<String, String> providerConfiguration = Map.of(

@@ -14,7 +14,7 @@ and must stay true when behaviour changes.
 | `secrets-client-bom` | n/a | BOM of the modules below |
 | `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, values kept as bytes, no logging |
-| `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic.configuration` | `io.descoped.config:dynamic-configuration`, for tests and migration |
+| `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | read-only, on `io.descoped.config:dynamic-configuration` 3.x, for tests and migration |
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google.rest.api` | Google Secret Manager REST API with google-auth |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
