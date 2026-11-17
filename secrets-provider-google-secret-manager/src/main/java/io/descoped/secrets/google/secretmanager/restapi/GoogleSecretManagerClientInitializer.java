@@ -7,8 +7,17 @@ import io.descoped.service.provider.api.ProviderName;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * The provider {@code google-secret-manager}.
+ */
 @ProviderName("google-secret-manager")
 public class GoogleSecretManagerClientInitializer implements SecretManagerClientInitializer {
+
+    /**
+     * Creates the initializer; called by {@link java.util.ServiceLoader}.
+     */
+    public GoogleSecretManagerClientInitializer() {
+    }
 
     @Override
     public String providerId() {

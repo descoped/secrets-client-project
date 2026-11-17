@@ -1,9 +1,12 @@
 import io.descoped.secrets.api.SecretManagerClientInitializer;
 
+/**
+ * The safe-configuration secrets provider, for a local secrets file.
+ */
 module io.descoped.secrets.provider.safe.configuration {
 
     requires io.descoped.service.provider.api;
-    requires io.descoped.secrets.client.api;
+    requires transitive io.descoped.secrets.client.api;
 
     requires org.slf4j;
 

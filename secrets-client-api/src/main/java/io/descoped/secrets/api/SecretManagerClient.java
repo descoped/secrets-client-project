@@ -36,7 +36,7 @@ public interface SecretManagerClient extends AutoCloseable {
     /**
      * Read secret
      *
-     * @param secretName
+     * @param secretName the name of the secret
      * @return secret value as string
      */
     default String readString(String secretName) {
@@ -46,8 +46,8 @@ public interface SecretManagerClient extends AutoCloseable {
     /**
      * Read secret for a specific version
      *
-     * @param secretName
-     * @param secretVersion
+     * @param secretName the name of the secret
+     * @param secretVersion the version to read, or {@code null} for the latest
      * @return secret value as string
      */
     default String readString(String secretName, String secretVersion) {
@@ -57,7 +57,7 @@ public interface SecretManagerClient extends AutoCloseable {
     /**
      * Read secret
      *
-     * @param secretName
+     * @param secretName the name of the secret
      * @return secret value as byte-array
      */
     default byte[] readBytes(String secretName) {
@@ -67,8 +67,8 @@ public interface SecretManagerClient extends AutoCloseable {
     /**
      * Read secret for a specific version
      *
-     * @param secretName
-     * @param secretVersion
+     * @param secretName the name of the secret
+     * @param secretVersion the version to read, or {@code null} for the latest
      * @return secret value as byte-array
      */
     byte[] readBytes(String secretName, String secretVersion);

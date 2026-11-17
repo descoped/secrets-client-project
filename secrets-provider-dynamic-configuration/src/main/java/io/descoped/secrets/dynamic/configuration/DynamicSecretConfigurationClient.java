@@ -18,6 +18,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static java.util.Optional.ofNullable;
 
+/**
+ * A client that reads secrets from dynamic-configuration. For tests and migration only: values are
+ * held as strings in memory.
+ */
 public class DynamicSecretConfigurationClient implements SecretManagerClient {
 
     static final Logger LOG = LoggerFactory.getLogger(DynamicSecretConfigurationClient.class);
@@ -25,6 +29,11 @@ public class DynamicSecretConfigurationClient implements SecretManagerClient {
     final String propertyResourcePath;
     final Object lock = new Object();
 
+    /**
+     * Reads the secrets from a properties resource.
+     *
+     * @param propertyResourcePath the properties file or class-path resource
+     */
     public DynamicSecretConfigurationClient(String propertyResourcePath) {
         new StoreBasedDynamicConfiguration.Builder()
                 .propertiesResource(propertyResourcePath)
@@ -34,6 +43,11 @@ public class DynamicSecretConfigurationClient implements SecretManagerClient {
         this.propertyResourcePath = propertyResourcePath;
     }
 
+    /**
+     * Uses the given map as the secrets.
+     *
+     * @param configuration the secrets by name
+     */
     public DynamicSecretConfigurationClient(Map<String, String> configuration) {
         configuration.forEach((key, value) -> map.put(key, Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8))));
         this.propertyResourcePath = null;

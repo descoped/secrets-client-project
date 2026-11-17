@@ -1,11 +1,14 @@
 import io.descoped.secrets.api.SecretManagerClientInitializer;
 
+/**
+ * The Google Secret Manager secrets provider.
+ */
 module io.descoped.secrets.provider.google.rest.api {
 
     requires java.net.http;
 
     requires io.descoped.service.provider.api;
-    requires io.descoped.secrets.client.api;
+    requires transitive io.descoped.secrets.client.api;
 
     requires com.google.auth;
     requires com.google.auth.oauth2;
