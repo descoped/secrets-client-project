@@ -1,7 +1,7 @@
 name: CI
 
 # One job on JDK 17, the baseline: every build compiles with `release 17`, so the bytecode does not depend on the
-# JDK, and 17 is the oldest runtime users have. Pull requests: build, tests and Javadoc of every module.
+# JDK, and 17 is the oldest runtime users have. Pull requests: build, tests and Javadoc of every module, and the JPMS consumer smoke test.
 # Pushes to master and release tags add coverage and the SonarCloud analysis (not gating); master then publishes a
 # SNAPSHOT.
 on:
@@ -69,6 +69,9 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONARCLOUD_TOKEN }}
         run: ./mvnw --batch-mode --no-transfer-progress -P sonar org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+
+      - name: JPMS consumer smoke test
+        run: src/it/consumer/run.sh
 
       # Every change merged to master is published as a SNAPSHOT to the Central Portal snapshot repository
       # (https://central.sonatype.com/repository/maven-snapshots/). Releases are never published from CI.
