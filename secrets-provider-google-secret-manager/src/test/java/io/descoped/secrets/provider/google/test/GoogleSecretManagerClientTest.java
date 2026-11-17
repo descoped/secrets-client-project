@@ -227,7 +227,8 @@ class GoogleSecretManagerClientTest {
     void theEndpointMustUseHttpsExceptOnLoopback() throws IOException {
         for (String endpoint : List.of("http://secretmanager.googleapis.com", "http://10.0.0.1:8080", "ftp://host",
                 "http://localhost.evil.example", "https://")) {
-            assertThrows(IllegalArgumentException.class, () -> open(Map.of("secrets.endpoint", endpoint)), endpoint);
+            Map<String, String> configuration = Map.of("secrets.endpoint", endpoint);
+            assertThrows(IllegalArgumentException.class, () -> open(configuration), endpoint);
         }
         for (String endpoint : List.of("https://europe-north1-secretmanager.googleapis.com", "http://localhost:1",
                 "http://127.0.0.1:1", "http://[::1]:1")) {

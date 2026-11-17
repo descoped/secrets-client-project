@@ -56,6 +56,7 @@ public final class DynamicConfigurationClientInitializer implements SecretManage
      * Creates the initializer; called by {@link java.util.ServiceLoader}.
      */
     public DynamicConfigurationClientInitializer() {
+        // No state: ServiceLoader needs a public no-argument constructor, the work is done in initialize.
     }
 
     @Override

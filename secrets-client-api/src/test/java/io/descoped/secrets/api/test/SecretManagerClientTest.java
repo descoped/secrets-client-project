@@ -47,24 +47,25 @@ class SecretManagerClientTest {
 
     @Test
     void createWithoutAProviderNameFails() {
+        Map<String, String> noProvider = Map.of("memory.required", "yes");
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> SecretManagerClient.create(Map.of("memory.required", "yes")));
+                () -> SecretManagerClient.create(noProvider));
         assertTrue(e.getMessage().contains(SecretManagerClient.PROVIDER_KEY));
-        assertThrows(IllegalArgumentException.class,
-                () -> SecretManagerClient.create(Map.of(SecretManagerClient.PROVIDER_KEY, " ")));
+        Map<String, String> blankProvider = Map.of(SecretManagerClient.PROVIDER_KEY, " ");
+        assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(blankProvider));
         assertThrows(NullPointerException.class, () -> SecretManagerClient.create(null));
     }
 
     @Test
     void createWithAnUnknownProviderFails() {
-        assertThrows(ProviderException.class,
-                () -> SecretManagerClient.create(Map.of(SecretManagerClient.PROVIDER_KEY, "nope")));
+        Map<String, String> unknown = Map.of(SecretManagerClient.PROVIDER_KEY, "nope");
+        assertThrows(ProviderException.class, () -> SecretManagerClient.create(unknown));
     }
 
     @Test
     void createWithoutARequiredKeyFails() {
-        assertThrows(IllegalArgumentException.class,
-                () -> SecretManagerClient.create(Map.of(SecretManagerClient.PROVIDER_KEY, "memory")));
+        Map<String, String> missingKey = Map.of(SecretManagerClient.PROVIDER_KEY, "memory");
+        assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(missingKey));
     }
 
     @Test

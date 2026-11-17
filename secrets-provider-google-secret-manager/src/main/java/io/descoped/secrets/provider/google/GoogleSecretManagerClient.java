@@ -40,7 +40,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
     /**
      * Version ids: a version number or {@code latest}.
      */
-    static final Pattern VERSION_ID = Pattern.compile("latest|[1-9][0-9]{0,18}");
+    static final Pattern VERSION_ID = Pattern.compile("latest|[1-9]\\d{0,18}");
 
     private static final JsonFactory JSON = new JsonFactory();
 
@@ -57,7 +57,12 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
 
     GoogleSecretManagerClient(URI endpoint, String projectId, GoogleCredentials credentials,
                               List<String> replicationLocations, Duration connectTimeout, Duration requestTimeout) {
-        String base = endpoint.toString().replaceAll("/+$", "");
+        String base = endpoint.toString();
+        int end = base.length();
+        while (end > 0 && base.charAt(end - 1) == '/') {
+            end--;
+        }
+        base = base.substring(0, end);
         this.projectUri = URI.create(base + "/v1/projects/" + projectId);
         this.replicationLocations = List.copyOf(replicationLocations);
         this.requestTimeout = requestTimeout;
@@ -227,43 +232,87 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
      * the value is decoded from Base64 straight into bytes.
      */
     private static byte[] payload(byte[] body, String secretName) {
-        byte[] data = null;
-        Long expectedCrc = null;
+        Payload payload = new Payload();
         try (JsonParser json = JSON.createParser(body)) {
             if (json.nextToken() != JsonToken.START_OBJECT) {
                 throw malformed(secretName);
             }
-            while (json.nextToken() == JsonToken.FIELD_NAME) {
-                String field = json.currentName();
-                json.nextToken();
-                if ("payload".equals(field) && json.currentToken() == JsonToken.START_OBJECT) {
-                    while (json.nextToken() == JsonToken.FIELD_NAME) {
-                        String inner = json.currentName();
-                        json.nextToken();
-                        if ("data".equals(inner)) {
-                            data = json.getBinaryValue();
-                        } else if ("dataCrc32c".equals(inner)) {
-                            expectedCrc = Long.parseLong(json.getValueAsString());
-                        } else {
-                            json.skipChildren();
-                        }
-                    }
+            readObject(json, (field, value) -> {
+                if ("payload".equals(field) && value.currentToken() == JsonToken.START_OBJECT) {
+                    readObject(value, payload::read);
                 } else {
-                    json.skipChildren();
+                    value.skipChildren();
                 }
-            }
+            });
         } catch (IOException | NumberFormatException e) {
-            wipe(data);
+            wipe(payload.data);
             throw new SecretManagerException("Cannot parse the response for secret '" + secretName + "'", e);
         }
-        if (data == null) {
+        if (payload.data == null) {
             throw malformed(secretName);
         }
-        if (expectedCrc != null && expectedCrc != crc32c(data)) {
-            wipe(data);
+        if (payload.crc32c != null && payload.crc32c != crc32c(payload.data)) {
+            wipe(payload.data);
             throw new SecretManagerException("Checksum mismatch in the response for secret '" + secretName + "'");
         }
-        return data;
+        return payload.data;
+    }
+
+    /**
+     * The fields of {@code payload} that a secret version response is read for.
+     */
+    private static final class Payload {
+        private byte[] data;
+        private Long crc32c;
+
+        void read(String field, JsonParser json) throws IOException {
+            if ("data".equals(field)) {
+                wipe(data);
+                data = json.getBinaryValue();
+            } else if ("dataCrc32c".equals(field)) {
+                crc32c = Long.parseLong(json.getValueAsString());
+            } else {
+                json.skipChildren();
+            }
+        }
+    }
+
+    /**
+     * The fields of {@code error} in a Google error response.
+     */
+    private static final class GoogleError {
+        private String status;
+        private String message;
+
+        void read(String field, JsonParser json) throws IOException {
+            if ("status".equals(field)) {
+                status = json.getValueAsString();
+            } else if ("message".equals(field)) {
+                message = json.getValueAsString();
+            } else {
+                json.skipChildren();
+            }
+        }
+    }
+
+    /**
+     * Reads one field of a JSON object; the parser is at the field's value.
+     */
+    @FunctionalInterface
+    private interface FieldReader {
+        void read(String field, JsonParser json) throws IOException;
+    }
+
+    /**
+     * Calls {@code reader} for every field of the object the parser has just entered, with the parser at the value.
+     * The reader consumes the value, or skips it with {@link JsonParser#skipChildren()}.
+     */
+    private static void readObject(JsonParser json, FieldReader reader) throws IOException {
+        while (json.nextToken() == JsonToken.FIELD_NAME) {
+            String field = json.currentName();
+            json.nextToken();
+            reader.read(field, json);
+        }
     }
 
     private static SecretManagerException malformed(String secretName) {
@@ -296,40 +345,27 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
      * Google's error responses do not contain secret values. Never the raw body.
      */
     private static SecretManagerException failure(int statusCode, byte[] body, String action, String secretName) {
-        String status = null;
-        String message = null;
+        GoogleError error = new GoogleError();
         try (JsonParser json = JSON.createParser(body)) {
             if (json.nextToken() == JsonToken.START_OBJECT) {
-                while (json.nextToken() == JsonToken.FIELD_NAME) {
-                    String field = json.currentName();
-                    json.nextToken();
-                    if ("error".equals(field) && json.currentToken() == JsonToken.START_OBJECT) {
-                        while (json.nextToken() == JsonToken.FIELD_NAME) {
-                            String inner = json.currentName();
-                            json.nextToken();
-                            if ("status".equals(inner)) {
-                                status = json.getValueAsString();
-                            } else if ("message".equals(inner)) {
-                                message = json.getValueAsString();
-                            } else {
-                                json.skipChildren();
-                            }
-                        }
+                readObject(json, (field, value) -> {
+                    if ("error".equals(field) && value.currentToken() == JsonToken.START_OBJECT) {
+                        readObject(value, error::read);
                     } else {
-                        json.skipChildren();
+                        value.skipChildren();
                     }
-                }
+                });
             }
         } catch (IOException ignored) {
             // Not a Google error document; the HTTP status says enough.
         }
         StringBuilder text = new StringBuilder("Google Secret Manager returned HTTP ").append(statusCode);
-        if (status != null) {
-            text.append(' ').append(status);
+        if (error.status != null) {
+            text.append(' ').append(error.status);
         }
         text.append(" when ").append(action).append(" secret '").append(secretName).append('\'');
-        if (message != null) {
-            text.append(": ").append(message);
+        if (error.message != null) {
+            text.append(": ").append(error.message);
         }
         return new SecretManagerException(text.toString());
     }

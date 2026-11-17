@@ -49,6 +49,7 @@ public final class SafeConfigurationClientInitializer implements SecretManagerCl
      * Creates the initializer; called by {@link java.util.ServiceLoader}.
      */
     public SafeConfigurationClientInitializer() {
+        // No state: ServiceLoader needs a public no-argument constructor, the work is done in initialize.
     }
 
     @Override
