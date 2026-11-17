@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class SafeConfigurationClientTest {
@@ -60,7 +61,7 @@ class SafeConfigurationClientTest {
                 url=https://x:8080/a!b\\c
                 unicode=blåbær €
                 empty=
-                last=no newline""".replace("no newline\n", "no newline"));
+                last=no newline""");
         try (SecretManagerClient client = open(file)) {
             assertEquals("password1", client.readString("plain"));
             assertEquals("key=value", client.readString("with-equals"));
@@ -75,7 +76,7 @@ class SafeConfigurationClientTest {
     @Test
     void readsCrlfAndAByteOrderMark() throws IOException {
         Path file = dir.resolve("dos.properties");
-        Files.write(file, "﻿a=1\r\n# c\r\nb=2\r\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(file, "\uFEFFa=1\r\n# c\r\nb=2\r\n".getBytes(StandardCharsets.UTF_8));
         try (SecretManagerClient client = open(file)) {
             assertEquals("1", client.readString("a"));
             assertEquals("2", client.readString("b"));
@@ -173,13 +174,16 @@ class SafeConfigurationClientTest {
     void addVersionRejectsWhatTheFormatCannotHold() throws IOException {
         Path file = file("a=1\n");
         try (SecretManagerClient client = open(file)) {
-            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            SecretManagerException e = assertThrows(SecretManagerException.class,
                     () -> client.addVersion("b", "line1\nhunter2"));
             assertFalse(e.getMessage().contains("hunter2"));
-            assertThrows(IllegalArgumentException.class, () -> client.addVersion("b", "x\ry"));
-            for (String name : List.of("", " ", " b", "b=c", "#b", "b\nc")) {
-                assertThrows(IllegalArgumentException.class, () -> client.addVersion(name, "1"), name);
+            assertThrows(SecretManagerException.class, () -> client.addVersion("b", "x\ry"));
+            for (String name : List.of("", " ", " b", "b\t", "\fb", "b=c", "#b", "b\nc")) {
+                assertThrows(SecretManagerException.class, () -> client.addVersion(name, "1"), name);
             }
+            byte[] value = "1".getBytes(StandardCharsets.UTF_8);
+            assertThrows(SecretManagerException.class, () -> client.addVersion("b\uD800", value),
+                    "an unpaired surrogate would be written as '?'");
             assertThrows(SecretNotFoundException.class, () -> client.readString("b"));
         }
         assertEquals("a=1\n", read(file));
@@ -203,6 +207,7 @@ class SafeConfigurationClientTest {
     @Test
     void aReadOnlyFileIsAnErrorAndChangesNothing() throws IOException {
         assumeTrue(dir.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        assumeFalse("root".equals(System.getProperty("user.name")), "root may write to a read-only file");
         Path file = file("a=1\n");
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--------"));
         try (SecretManagerClient client = open(file)) {
@@ -219,6 +224,45 @@ class SafeConfigurationClientTest {
         client.close();
         assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
         assertThrows(IllegalStateException.class, () -> client.addVersion("a", "2"));
+        assertThrows(IllegalStateException.class, () -> client.addVersion("#invalid", "2"),
+                "a closed client fails before it checks the name");
+    }
+
+    @Test
+    void blanksAroundKeysAndBeforeCommentsAreSpaceTabFormFeedAndVerticalTab() throws IOException {
+        try (SecretManagerClient client = open(file("\f# a comment\n\u000B\tkey\f = value\n"))) {
+            assertEquals(" value", client.readString("key"));
+            assertThrows(SecretNotFoundException.class, () -> client.readString("# a comment"));
+        }
+    }
+
+    @Test
+    void addVersionFailsWithoutChangesWhenSomeoneElseBrokeTheFile() throws IOException {
+        Path file = file("a=1\n");
+        try (SecretManagerClient client = open(file)) {
+            Files.writeString(file, "a=1\nbroken line\n");
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.addVersion("a", "2"));
+            assertTrue(e.getMessage().contains("line 2 has no '='"), e.getMessage());
+            assertEquals("1", client.readString("a"));
+        }
+        assertEquals("a=1\nbroken line\n", read(file));
+    }
+
+    @Test
+    void addVersionWritesThroughASymbolicLinkAndKeepsTheLink() throws IOException {
+        Path target = file("a=1\n");
+        Path link;
+        try {
+            link = Files.createSymbolicLink(dir.resolve("link.properties"), target);
+        } catch (UnsupportedOperationException | IOException e) {
+            assumeTrue(false, "symbolic links are not supported here");
+            return;
+        }
+        try (SecretManagerClient client = open(link)) {
+            client.addVersion("a", "2");
+        }
+        assertTrue(Files.isSymbolicLink(link));
+        assertEquals("a=2\n", read(target));
     }
 
     @Test

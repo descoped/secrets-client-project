@@ -21,17 +21,21 @@ import java.util.Set;
  * <h2>File format</h2>
  * <ul>
  *     <li>UTF-8 (a leading byte-order mark is skipped), lines end with LF or CRLF.</li>
- *     <li>One {@code key=value} per line. The first {@code =} separates key and value; the key is trimmed, the value
- *     is taken byte for byte, including surrounding whitespace and further {@code =}. There are no escapes, so
- *     values cannot contain line breaks.</li>
- *     <li>Blank lines and lines whose first non-blank character is {@code #} are ignored.</li>
+ *     <li>One {@code key=value} per line. The first {@code =} separates key and value; blanks (space, tab, form
+ *     feed, vertical tab) around the key are removed, the value is taken byte for byte, including surrounding
+ *     blanks and further {@code =}. There are no escapes, so values cannot contain line breaks.</li>
+ *     <li>Empty lines, lines of blanks and lines whose first non-blank character is {@code #} are ignored.</li>
  *     <li>A line without {@code =}, an empty key and a duplicate key are errors, reported with the line number.</li>
  * </ul>
  *
  * <p>This is not the {@link java.util.Properties} format: {@code \}, {@code :} and {@code !} have no special meaning.
  *
- * <p>The file is read once, when the client is created. {@code addVersion} writes the value to the file (see
- * {@code SafeConfigurationClient#addVersion}); the only version is {@code latest}.
+ * <p>The file is read once, when the client is created; the only version is {@code latest}. {@code addVersion}
+ * replaces the key's line in place, or appends one, and keeps every other line. It replaces the file (the target of
+ * a symbolic link) atomically by a new file, which is owned by the writing user and readable and writable by that
+ * user only: a file that others were allowed to read, by group or otherwise, is not after a write. A file system that
+ * cannot move atomically, a name the format cannot hold and a value with a line break are
+ * {@link io.descoped.secrets.api.SecretManagerException}s.
  */
 @ProviderName("safe-configuration")
 public final class SafeConfigurationClientInitializer implements SecretManagerClientInitializer {

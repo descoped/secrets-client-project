@@ -4,12 +4,13 @@ import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.api.SecretNotFoundException;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -28,8 +29,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * {@link SafeConfigurationClientInitializer} for the format. Values stay bytes from the file to the caller: they are
  * never decoded to strings, and every copy the client holds is wiped when it is replaced and on {@link #close()}.
  *
- * <p>The file is parsed as bytes. That is safe for UTF-8, because the bytes of {@code =}, {@code #}, CR and LF never
- * occur inside a multi-byte UTF-8 sequence.
+ * <p>The file is parsed as bytes. That is safe for UTF-8, because the bytes of {@code =}, {@code #}, CR, LF and the
+ * blanks (space, tab, form feed, vertical tab) never occur inside a multi-byte UTF-8 sequence.
  */
 final class SafeConfigurationClient implements SecretManagerClient {
 
@@ -51,6 +52,7 @@ final class SafeConfigurationClient implements SecretManagerClient {
         try {
             parse(content, (key, value, line) -> {
                 if (secrets.containsKey(key)) {
+                    Arrays.fill(value, (byte) 0);
                     throw new SecretManagerException(path + ": line " + line + ": duplicate key '" + key + "'");
                 }
                 secrets.put(key, value);
@@ -81,35 +83,39 @@ final class SafeConfigurationClient implements SecretManagerClient {
 
     /**
      * Writes the value to the file, replacing the line of an existing key in place or appending a line, and returns
-     * {@value #LATEST}. The file is replaced atomically by a new file that only its owner can read and write (where
-     * the file system supports POSIX permissions); comments, blank lines, line endings and the order of the other
-     * lines are kept.
+     * {@value #LATEST}. The file (the target of a symbolic link) is replaced atomically by a new file that only its
+     * owner can read and write (where the file system supports POSIX permissions); comments, blank lines, line
+     * endings and the order of the other lines are kept. A file system that cannot move atomically is an error.
      *
-     * @throws IllegalArgumentException if the name is not a valid key, or the value contains CR or LF
+     * @throws SecretManagerException if the name is not a valid key, the value contains CR or LF, or the file cannot
+     *                                be written
      */
     @Override
     public String addVersion(String secretName, byte[] secretValue) {
         Objects.requireNonNull(secretName, "secretName");
         Objects.requireNonNull(secretValue, "secretValue");
-        checkKey(secretName);
-        for (byte b : secretValue) {
-            if (b == '\n' || b == '\r') {
-                throw new IllegalArgumentException("The value of secret '" + secretName
-                        + "' contains a line break, which this file format cannot hold");
-            }
-        }
-        byte[] value = secretValue.clone();
         lock.writeLock().lock();
+        byte[] value = null;
         try {
             checkOpen();
-            writeFile(secretName, value);
+            byte[] keyBytes = checkKey(secretName);
+            for (byte b : secretValue) {
+                if (b == '\n' || b == '\r') {
+                    throw new SecretManagerException("The value of secret '" + secretName
+                            + "' contains a line break, which this file format cannot hold");
+                }
+            }
+            value = secretValue.clone();
+            writeFile(secretName, keyBytes, value);
             byte[] previous = secrets.put(secretName, value);
             if (previous != null) {
                 Arrays.fill(previous, (byte) 0);
             }
             return LATEST;
         } catch (RuntimeException e) {
-            Arrays.fill(value, (byte) 0);
+            if (value != null) {
+                Arrays.fill(value, (byte) 0);
+            }
             throw e;
         } finally {
             lock.writeLock().unlock();
@@ -140,12 +146,42 @@ final class SafeConfigurationClient implements SecretManagerClient {
         secrets.clear();
     }
 
-    private static void checkKey(String key) {
-        if (key.isBlank() || !key.equals(key.strip()) || key.startsWith("#")
-                || key.indexOf('=') >= 0 || key.indexOf('\n') >= 0 || key.indexOf('\r') >= 0) {
-            throw new IllegalArgumentException("Invalid secret name '" + key + "': it must be non-blank, without"
-                    + " surrounding whitespace, '=' or line breaks, and not start with '#'");
+    /**
+     * Checks that the name can be written as a key that reads back as the same name, and returns it as UTF-8.
+     */
+    private static byte[] checkKey(String key) {
+        byte[] bytes;
+        try {
+            ByteBuffer encoded = StandardCharsets.UTF_8.newEncoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .encode(CharBuffer.wrap(key));
+            bytes = new byte[encoded.remaining()];
+            encoded.get(bytes);
+        } catch (CharacterCodingException e) {
+            throw invalidKey(key);
         }
+        if (bytes.length == 0 || isBlank(bytes[0]) || isBlank(bytes[bytes.length - 1]) || bytes[0] == '#') {
+            throw invalidKey(key);
+        }
+        for (byte b : bytes) {
+            if (b == '=' || b == '\n' || b == '\r') {
+                throw invalidKey(key);
+            }
+        }
+        return bytes;
+    }
+
+    private static SecretManagerException invalidKey(String key) {
+        return new SecretManagerException("Invalid secret name '" + key + "': it must be non-empty valid UTF-16,"
+                + " without surrounding blanks, '=' or line breaks, and not start with '#'");
+    }
+
+    /**
+     * Space, tab, form feed and vertical tab: the blanks around keys and before comments.
+     */
+    private static boolean isBlank(byte b) {
+        return b == ' ' || b == '\t' || b == '\f' || b == 0x0B;
     }
 
     private static byte[] readFile(Path path) {
@@ -158,16 +194,15 @@ final class SafeConfigurationClient implements SecretManagerClient {
 
     /**
      * Rewrites the file with {@code key=value}: the line holding the key is replaced, keeping its line ending, or a
-     * line is appended. Every other byte of the file is copied as is.
+     * line is appended. Every other byte of the file is copied as is. The new content is built in one array of
+     * exactly the right size, so no copy of the file is left behind unwiped.
      */
-    private void writeFile(String key, byte[] value) {
-        byte[] content = readFile(path);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(content.length + key.length() + value.length + 2);
+    private void writeFile(String key, byte[] keyBytes, byte[] value) {
+        Path target = resolveTarget();
+        byte[] content = readFile(target);
         byte[] result = null;
         try {
-            byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
-            boolean[] replaced = {false};
-            int[] copied = {0};
+            int[] keyLine = {-1, -1, -1};
             parse(content, new LineVisitor() {
                 @Override
                 public void entry(String k, byte[] v, int line) {
@@ -176,46 +211,70 @@ final class SafeConfigurationClient implements SecretManagerClient {
 
                 @Override
                 public void line(int start, int contentEnd, int end, String k) {
-                    if (key.equals(k) && !replaced[0]) {
-                        out.write(content, copied[0], start - copied[0]);
-                        out.writeBytes(keyBytes);
-                        out.write('=');
-                        out.writeBytes(value);
-                        out.write(content, contentEnd, end - contentEnd);
-                        copied[0] = end;
-                        replaced[0] = true;
+                    if (key.equals(k) && keyLine[0] < 0) {
+                        keyLine[0] = start;
+                        keyLine[1] = contentEnd;
+                        keyLine[2] = end;
                     }
                 }
             });
-            out.write(content, copied[0], content.length - copied[0]);
-            if (!replaced[0]) {
-                if (content.length > 0 && content[content.length - 1] != '\n') {
-                    out.writeBytes(lineSeparator(content));
+            int entryLength = keyBytes.length + 1 + value.length;
+            if (keyLine[0] >= 0) {
+                result = new byte[content.length - (keyLine[1] - keyLine[0]) + entryLength];
+                int pos = put(result, 0, content, 0, keyLine[0]);
+                pos = putEntry(result, pos, keyBytes, value);
+                put(result, pos, content, keyLine[1], content.length - keyLine[1]);
+            } else {
+                byte[] separator = lineSeparator(content);
+                boolean needsBreak = content.length > 0 && content[content.length - 1] != '\n';
+                result = new byte[content.length + (needsBreak ? separator.length : 0) + entryLength
+                        + separator.length];
+                int pos = put(result, 0, content, 0, content.length);
+                if (needsBreak) {
+                    pos = put(result, pos, separator, 0, separator.length);
                 }
-                out.writeBytes(keyBytes);
-                out.write('=');
-                out.writeBytes(value);
-                out.writeBytes(lineSeparator(content));
+                pos = putEntry(result, pos, keyBytes, value);
+                put(result, pos, separator, 0, separator.length);
             }
-            result = out.toByteArray();
-            replaceFile(result);
+            replaceFile(target, result);
         } finally {
             Arrays.fill(content, (byte) 0);
             if (result != null) {
                 Arrays.fill(result, (byte) 0);
             }
-            wipe(out);
         }
     }
 
-    private void replaceFile(byte[] content) {
-        Path dir = path.toAbsolutePath().getParent();
-        if (!Files.isWritable(path) || dir == null || !Files.isWritable(dir)) {
-            throw new SecretManagerException("The secrets file " + path + " is not writable");
+    private static int put(byte[] dest, int pos, byte[] src, int from, int length) {
+        System.arraycopy(src, from, dest, pos, length);
+        return pos + length;
+    }
+
+    private static int putEntry(byte[] dest, int pos, byte[] keyBytes, byte[] value) {
+        pos = put(dest, pos, keyBytes, 0, keyBytes.length);
+        dest[pos++] = '=';
+        return put(dest, pos, value, 0, value.length);
+    }
+
+    /**
+     * The file to replace: the target of a symbolic link, so that the link is kept.
+     */
+    private Path resolveTarget() {
+        try {
+            return path.toRealPath();
+        } catch (IOException e) {
+            throw new SecretManagerException("Cannot resolve the secrets file " + path, e);
+        }
+    }
+
+    private static void replaceFile(Path target, byte[] content) {
+        Path dir = target.getParent();
+        if (!Files.isWritable(target) || dir == null || !Files.isWritable(dir)) {
+            throw new SecretManagerException("The secrets file " + target + " is not writable");
         }
         Path tmp = null;
         try {
-            tmp = Files.createTempFile(dir, "." + path.getFileName(), ".tmp", ownerOnly(dir));
+            tmp = Files.createTempFile(dir, "." + target.getFileName(), ".tmp", ownerOnly(dir));
             try (FileChannel channel = FileChannel.open(tmp, StandardOpenOption.WRITE)) {
                 ByteBuffer buffer = ByteBuffer.wrap(content);
                 while (buffer.hasRemaining()) {
@@ -223,14 +282,10 @@ final class SafeConfigurationClient implements SecretManagerClient {
                 }
                 channel.force(true);
             }
-            try {
-                Files.move(tmp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
-            }
+            Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             tmp = null;
         } catch (IOException e) {
-            throw new SecretManagerException("Cannot write the secrets file " + path, e);
+            throw new SecretManagerException("Cannot write the secrets file " + target, e);
         } finally {
             if (tmp != null) {
                 try {
@@ -259,13 +314,6 @@ final class SafeConfigurationClient implements SecretManagerClient {
             }
         }
         return new byte[]{'\n'};
-    }
-
-    private static void wipe(ByteArrayOutputStream out) {
-        // ByteArrayOutputStream cannot be cleared in place; overwrite what it holds with zeros of the same length.
-        int size = out.size();
-        out.reset();
-        out.writeBytes(new byte[size]);
     }
 
     /**
@@ -303,7 +351,7 @@ final class SafeConfigurationClient implements SecretManagerClient {
             int next = end < content.length ? end + 1 : end;
 
             int first = pos;
-            while (first < contentEnd && (content[first] == ' ' || content[first] == '\t')) {
+            while (first < contentEnd && isBlank(content[first])) {
                 first++;
             }
             String key = null;
@@ -315,10 +363,14 @@ final class SafeConfigurationClient implements SecretManagerClient {
                 if (eq == contentEnd) {
                     throw new SecretManagerException(path + ": line " + lineNumber + " has no '='");
                 }
-                key = new String(content, first, eq - first, StandardCharsets.UTF_8).strip();
-                if (key.isEmpty()) {
+                int keyEnd = eq;
+                while (keyEnd > first && isBlank(content[keyEnd - 1])) {
+                    keyEnd--;
+                }
+                if (keyEnd == first) {
                     throw new SecretManagerException(path + ": line " + lineNumber + " has an empty key");
                 }
+                key = new String(content, first, keyEnd - first, StandardCharsets.UTF_8);
                 visitor.entry(key, Arrays.copyOfRange(content, eq + 1, contentEnd), lineNumber);
             }
             visitor.line(pos, contentEnd, next, key);

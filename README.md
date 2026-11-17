@@ -113,16 +113,19 @@ secrets.property-resource-path  | path of the secrets file (required)
 File format:
 
 - UTF-8 (a leading byte-order mark is skipped), lines end with LF or CRLF.
-- One `key=value` per line. The first `=` separates key and value; the key is trimmed, the value is taken byte for
-  byte, including surrounding whitespace and further `=`. There are no escapes, so a value cannot contain a line break.
-- Blank lines and lines whose first non-blank character is `#` are ignored.
+- One `key=value` per line. The first `=` separates key and value; blanks (space, tab, form feed, vertical tab)
+  around the key are removed, the value is taken byte for byte, including surrounding blanks and further `=`. There
+  are no escapes, so a value cannot contain a line break.
+- Empty lines, lines of blanks and lines whose first non-blank character is `#` are ignored.
 - A line without `=`, an empty key and a duplicate key are errors, reported with the line number (never the value).
 - This is not the `java.util.Properties` format: `\`, `:` and `!` have no special meaning.
 
 The file is read once, when the client is created. The only version is `latest`. `addVersion` replaces the key's line
-in place, or appends one, and keeps every other line, comment and line ending. The file is replaced atomically by a
-new file that only its owner can read and write (on file systems with POSIX permissions); an unwritable file is a
-`SecretManagerException`.
+in place, or appends one, and keeps every other line, comment and line ending. The file (the target of a symbolic
+link) is replaced atomically by a new file, owned by the writing user and readable and writable by that user only
+(on file systems with POSIX permissions). **A file that a group or others could read is not readable by them after a
+write.** An unwritable file, a file system that cannot move atomically, a name the format cannot hold and a value with
+a line break are `SecretManagerException`s.
 
 ### Google Secret Manager
 
