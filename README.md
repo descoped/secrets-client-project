@@ -137,38 +137,44 @@ a line break are `SecretManagerException`s.
 
 ### Google Secret Manager
 
-Configuration for [Google Secret Manager](secrets-provider-google-secret-manager) provider:
+[Google Secret Manager](https://cloud.google.com/secret-manager) through its REST API, authenticated with
+google-auth. JPMS module `io.descoped.secrets.provider.google`.
 
 Property                         | Description
 ---------------------------------|----------------------------------------------
 secrets.provider                 | google-secret-manager (required)
-secrets.project-id               | team projectId (required)
-secrets.service-account-key-path | (optional) full filepath to service-account file enables `service-account`, otherwise it defaults to `compute-engine`. When running on a cluster you SHOULD NOT use a json-key-file!
+secrets.project-id               | the Google Cloud project id or number (required)
+secrets.service-account-key-path | a service-account JSON key file. Without it, Application Default Credentials are used: Workload Identity, the metadata server, `GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login`. **Do not use key files on a cluster.**
+secrets.replication-locations    | comma-separated locations, such as `europe-north1`, for secrets that `addVersion` creates (user-managed replication); automatic replication when absent
+secrets.endpoint                 | the API endpoint, default `https://secretmanager.googleapis.com` (for example a regional endpoint)
+secrets.connect-timeout          | ISO-8601 duration, default `PT10S`
+secrets.request-timeout          | ISO-8601 duration, default `PT30S`
 
+- The access token is taken from the credentials on every request, so google-auth refreshes it before it expires.
+- Versions are Secret Manager's: `latest` or a version number. `addVersion` returns the new number, and creates the
+  secret first if it does not exist.
+- Secret names must follow Secret Manager's rule (1 to 255 letters, digits, `-` and `_`); other names are rejected
+  before any request.
+- Values travel as bytes with a CRC32C checksum both ways, and a mismatch is an error.
+- Error messages carry the HTTP status and Google's error status and message, never the response body.
 
-## Example of use:
-
-1) google secret manager specific provider configuration
+## Example
 
 ```java
-Map<String, String> providerConfiguration = Map.of(
+Map<String, String> configuration = Map.of(
         "secrets.provider", "google-secret-manager",
-        "secrets.project-id", "descoped-team",
-        "secrets.service-account-key-path", "FULL_PATH_TO_SERVICE_ACCOUNT.json") // local testing only
-);
-```
+        "secrets.project-id", "my-project");   // Application Default Credentials
 
-> When running on a cluster you SHOULD NOT add the property `secrets.serviceAccountKeyPath`!
-
-2) create client and read secret
-
-```java
-try (SecretManagerClient client = SecretManagerClient.create(providerConfiguration)) {
-    assertEquals("42\n", client.readString("AN_ANSWER"));
-    assertArrayEquals("42\n".getBytes(), client.readBytes("AN_ANSWER"));
+try (SecretManagerClient client = SecretManagerClient.create(configuration)) {
+    char[] password = client.readChars("db-password");
+    try {
+        connect(password);
+    } finally {
+        Arrays.fill(password, '\0');
+    }
 }
 ```
 
-Please refer
-to [SecretManagerTest](secrets-provider-google-secret-manager/src/test/java/io/descoped/secrets/google/secretmanager/restapi/GoogleSecretManagerRestApiTest.java)
-for further details.
+The provider tests run against a local fake of Google. A live test,
+[GoogleSecretManagerLiveTest](secrets-provider-google-secret-manager/src/test/java/io/descoped/secrets/provider/google/test/GoogleSecretManagerLiveTest.java),
+runs when `SECRETS_GOOGLE_TEST_PROJECT` names a project.

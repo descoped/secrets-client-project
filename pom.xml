@@ -39,7 +39,6 @@
         <dynamic-configuration.version>3.0.1</dynamic-configuration.version>
         <slf4j.version>2.0.20</slf4j.version>
         <google-auth.version>1.57.0</google-auth.version>
-        <jsr305-jpms.version>1.2</jsr305-jpms.version>
         <jackson.version>2.23.0</jackson.version>
         <junit.version>6.1.3</junit.version>
     </properties>
@@ -213,20 +212,6 @@
                             <arg>-Werror</arg>
                         </compilerArgs>
                     </configuration>
-                    <executions>
-                        <!-- The tests still live in the modules' own packages (patched into the named module), which
-                             javac flags with -Xlint:exports and missing-explicit-ctor. They move to test modules of
-                             their own in the 3.0.0 revision, and this exception goes with it. -->
-                        <execution>
-                            <id>default-testCompile</id>
-                            <configuration>
-                                <compilerArgs combine.self="override">
-                                    <arg>-Xlint:all,-exports,-missing-explicit-ctor,-requires-automatic</arg>
-                                    <arg>-Werror</arg>
-                                </compilerArgs>
-                            </configuration>
-                        </execution>
-                    </executions>
                 </plugin>
 
                 <plugin>
