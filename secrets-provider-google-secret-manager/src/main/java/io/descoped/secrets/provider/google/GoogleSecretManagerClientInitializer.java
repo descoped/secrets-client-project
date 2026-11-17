@@ -175,19 +175,19 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
     }
 
     private static GoogleCredentials credentials(String keyPath) {
-        try {
-            if (keyPath == null) {
+        if (keyPath == null) {
+            try {
                 return GoogleCredentials.getApplicationDefault();
+            } catch (IOException e) {
+                throw new SecretManagerException("No Google Application Default Credentials found", e);
             }
-            // A service-account key only: other credential configurations (external_account and the like) can run
-            // programs or fetch URLs, and must not be loaded from a file that is only documented as a key.
-            try (InputStream in = Files.newInputStream(Path.of(keyPath))) {
-                return ServiceAccountCredentials.fromStream(in);
-            }
+        }
+        // A service-account key only: other credential configurations (external_account and the like) can run
+        // programs or fetch URLs, and must not be loaded from a file that is only documented as a key.
+        try (InputStream in = Files.newInputStream(Path.of(keyPath))) {
+            return ServiceAccountCredentials.fromStream(in);
         } catch (IOException e) {
-            throw new SecretManagerException(keyPath == null
-                    ? "No Google Application Default Credentials found"
-                    : "Cannot read the service-account key " + keyPath, e);
+            throw new SecretManagerException("Cannot read the service-account key " + keyPath, e);
         }
     }
 }
