@@ -12,7 +12,7 @@ module io.descoped.secrets.provider.google {
     // requires them; without that, the provider fails on the module path with NoClassDefFoundError.
     requires com.google.common;
     requires com.google.gson;
-    requires com.fasterxml.jackson.core;
+    requires tools.jackson.core;
 
     exports io.descoped.secrets.provider.google;
 

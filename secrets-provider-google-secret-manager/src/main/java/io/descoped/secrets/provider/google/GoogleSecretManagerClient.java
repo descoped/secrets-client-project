@@ -1,9 +1,12 @@
 package io.descoped.secrets.provider.google;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonToken;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonGenerator;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
+import tools.jackson.core.ObjectReadContext;
+import tools.jackson.core.ObjectWriteContext;
+import tools.jackson.core.json.JsonFactory;
 import com.google.auth.oauth2.GoogleCredentials;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
@@ -202,18 +205,18 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
      */
     private byte[] secretBody() {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try (JsonGenerator json = JSON.createGenerator(out)) {
+        try (JsonGenerator json = JSON.createGenerator(ObjectWriteContext.empty(), out)) {
             json.writeStartObject();
-            json.writeObjectFieldStart("replication");
+            json.writeObjectPropertyStart("replication");
             if (replicationLocations.isEmpty()) {
-                json.writeObjectFieldStart("automatic");
+                json.writeObjectPropertyStart("automatic");
                 json.writeEndObject();
             } else {
-                json.writeObjectFieldStart("userManaged");
-                json.writeArrayFieldStart("replicas");
+                json.writeObjectPropertyStart("userManaged");
+                json.writeArrayPropertyStart("replicas");
                 for (String location : replicationLocations) {
                     json.writeStartObject();
-                    json.writeStringField("location", location);
+                    json.writeStringProperty("location", location);
                     json.writeEndObject();
                 }
                 json.writeEndArray();
@@ -221,7 +224,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
             }
             json.writeEndObject();
             json.writeEndObject();
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             throw new SecretManagerException("Cannot build the request", e);
         }
         return out.toByteArray();
@@ -233,7 +236,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
      */
     private static byte[] payload(byte[] body, String secretName) {
         Payload payload = new Payload();
-        try (JsonParser json = JSON.createParser(body)) {
+        try (JsonParser json = JSON.createParser(ObjectReadContext.empty(), body)) {
             if (json.nextToken() != JsonToken.START_OBJECT) {
                 throw malformed(secretName);
             }
@@ -244,7 +247,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
                     value.skipChildren();
                 }
             });
-        } catch (IOException | NumberFormatException e) {
+        } catch (JacksonException | NumberFormatException e) {
             wipe(payload.data);
             throw new SecretManagerException("Cannot parse the response for secret '" + secretName + "'", e);
         }
@@ -265,7 +268,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
         private byte[] data;
         private Long crc32c;
 
-        void read(String field, JsonParser json) throws IOException {
+        void read(String field, JsonParser json) {
             if ("data".equals(field)) {
                 wipe(data);
                 data = json.getBinaryValue();
@@ -284,7 +287,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
         private String status;
         private String message;
 
-        void read(String field, JsonParser json) throws IOException {
+        void read(String field, JsonParser json) {
             if (json.currentToken().isStructStart()) {
                 // Not the documented string: skip the whole value so the parser keeps its place.
                 json.skipChildren();
@@ -303,15 +306,15 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
      */
     @FunctionalInterface
     private interface FieldReader {
-        void read(String field, JsonParser json) throws IOException;
+        void read(String field, JsonParser json);
     }
 
     /**
      * Calls {@code reader} for every field of the object the parser has just entered, with the parser at the value.
      * The reader consumes the value, or skips it with {@link JsonParser#skipChildren()}.
      */
-    private static void readObject(JsonParser json, FieldReader reader) throws IOException {
-        while (json.nextToken() == JsonToken.FIELD_NAME) {
+    private static void readObject(JsonParser json, FieldReader reader) {
+        while (json.nextToken() == JsonToken.PROPERTY_NAME) {
             String field = json.currentName();
             json.nextToken();
             reader.read(field, json);
@@ -327,17 +330,17 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
      */
     private static String field(byte[] body, String name, String secretName) {
         String[] found = new String[1];
-        try (JsonParser json = JSON.createParser(body)) {
+        try (JsonParser json = JSON.createParser(ObjectReadContext.empty(), body)) {
             if (json.nextToken() == JsonToken.START_OBJECT) {
                 readObject(json, (field, value) -> {
                     if (found[0] == null && name.equals(field) && value.currentToken() == JsonToken.VALUE_STRING) {
-                        found[0] = value.getText();
+                        found[0] = value.getString();
                     } else {
                         value.skipChildren();
                     }
                 });
             }
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             throw new SecretManagerException("Cannot parse the response for secret '" + secretName + "'", e);
         }
         if (found[0] == null) {
@@ -352,7 +355,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
      */
     private static SecretManagerException failure(int statusCode, byte[] body, String action, String secretName) {
         GoogleError error = new GoogleError();
-        try (JsonParser json = JSON.createParser(body)) {
+        try (JsonParser json = JSON.createParser(ObjectReadContext.empty(), body)) {
             if (json.nextToken() == JsonToken.START_OBJECT) {
                 readObject(json, (field, value) -> {
                     if ("error".equals(field) && value.currentToken() == JsonToken.START_OBJECT) {
@@ -362,7 +365,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
                     }
                 });
             }
-        } catch (IOException ignored) {
+        } catch (JacksonException ignored) {
             // Not a Google error document; the HTTP status says enough.
         }
         StringBuilder text = new StringBuilder("Google Secret Manager returned HTTP ").append(statusCode);
