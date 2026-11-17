@@ -38,10 +38,10 @@ and package names, the API and the providers change in it.
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and
   outdated code and configuration is removed, not carried along.
-- **Nothing is published to Maven Central until the 3.0.0 plan is complete** (owner's decision, 2026-11-17): the
-  "Publish SNAPSHOT" step in `ci.yml` is `if: false`, and no deploy or release is run by hand. Do not turn it on
-  without the owner's go-ahead.
-- **Publishing**, once turned on. Merges to `master` publish SNAPSHOTs of every module to the Central Portal snapshot repository
+- **No release before the 3.0.0 plan is complete** (owner's decision, 2026-11-17). SNAPSHOTs are fine; a release
+  (`release:prepare`/`release:perform`, an upload to the Central Portal) waits for the whole plan and the owner's
+  go-ahead.
+- **Publishing.** Merges to `master` publish SNAPSHOTs of every module to the Central Portal snapshot repository
   (`ci.yml`, step "Publish SNAPSHOT") with the secrets `CENTRAL_TOKEN_USER` / `CENTRAL_TOKEN_PASSWORD`; the step fails
   when they are missing. Releases go through the Central Portal (profiles `central,sign`), only with the owner's
   approval. CI never publishes a release. Maven 3.10 sends a server's credentials only to the hosts it knows for that
