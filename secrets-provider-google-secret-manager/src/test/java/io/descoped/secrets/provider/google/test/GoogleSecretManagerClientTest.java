@@ -12,10 +12,16 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.CRC32C;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -292,5 +298,73 @@ class GoogleSecretManagerClientTest {
         missingKey.put("secrets.project-id", "p");
         missingKey.put("secrets.service-account-key-path", dir.resolve("missing.json").toString());
         assertThrows(SecretManagerException.class, () -> SecretManagerClient.create(missingKey));
+    }
+
+    @Test
+    void concurrentReadsAndWritesShareOneClient() throws Exception {
+        google.on("GET", SECRETS + "/a/versions/latest:access", access("value-a"));
+        google.on("GET", SECRETS + "/b/versions/latest:access", access("value-b"));
+        google.on("POST", SECRETS + "/c:addVersion",
+                new Response(200, "{\"name\":\"projects/1/secrets/c/versions/7\"}"));
+        try (SecretManagerClient client = open()) {
+            ExecutorService executor = Executors.newFixedThreadPool(8);
+            try {
+                List<Future<?>> futures = new ArrayList<>();
+                for (int i = 0; i < 100; i++) {
+                    futures.add(executor.submit(() -> assertEquals("value-a", client.readString("a"))));
+                    futures.add(executor.submit(() -> assertEquals("value-b", client.readString("b"))));
+                    futures.add(executor.submit(() -> assertEquals("7", client.addVersion("c", "v"))));
+                }
+                for (Future<?> future : futures) {
+                    future.get(30, TimeUnit.SECONDS);
+                }
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+        assertEquals(300, google.requests.size());
+        assertTrue(google.requests.stream().allMatch(r -> r.authorization() != null), "every request is signed");
+    }
+
+    @Test
+    void callsInFlightWhenTheClientIsClosedFinishOrSeeAClosedClient() throws Exception {
+        google.on("GET", SECRETS + "/a/versions/latest:access", access("value-a"));
+        SecretManagerClient client = open();
+        callsRaceWithClose(client, () -> assertEquals("value-a", client.readString("a")));
+    }
+
+    /**
+     * Runs {@code call} on 8 threads until the client is closed under them. Every call must either succeed or, once
+     * the client is closed, throw {@link IllegalStateException}; anything else fails the test.
+     */
+    private static void callsRaceWithClose(SecretManagerClient client, Runnable call) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        CountDownLatch running = new CountDownLatch(8);
+        try {
+            List<Future<Integer>> futures = new ArrayList<>();
+            for (int t = 0; t < 8; t++) {
+                futures.add(executor.submit(() -> {
+                    int calls = 0;
+                    while (true) {
+                        try {
+                            call.run();
+                        } catch (IllegalStateException closed) {
+                            return calls;
+                        }
+                        if (++calls == 20) {
+                            running.countDown();
+                        }
+                    }
+                }));
+            }
+            assertTrue(running.await(30, TimeUnit.SECONDS), "every thread made 20 calls before the close");
+            client.close();
+            for (Future<Integer> future : futures) {
+                assertTrue(future.get(30, TimeUnit.SECONDS) >= 20);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThrows(IllegalStateException.class, call::run);
     }
 }

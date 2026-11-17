@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -43,6 +45,7 @@ final class FakeGoogle implements AutoCloseable {
     }
 
     private final HttpServer server;
+    private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private final Map<String, List<Response>> responses = new ConcurrentHashMap<>();
     final List<Request> requests = new CopyOnWriteArrayList<>();
     final AtomicInteger tokens = new AtomicInteger();
@@ -52,6 +55,8 @@ final class FakeGoogle implements AutoCloseable {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/token", this::token);
         server.createContext("/v1/", this::secretManager);
+        // Several threads, like a real server, so concurrent requests from a client overlap here too.
+        server.setExecutor(executor);
         server.start();
     }
 
@@ -92,7 +97,10 @@ final class FakeGoogle implements AutoCloseable {
                     + exchange.getRequestMethod() + " " + path + "\"}}");
             return;
         }
-        Response response = answers.size() > 1 ? answers.remove(0) : answers.get(0);
+        Response response;
+        synchronized (answers) {
+            response = answers.size() > 1 ? answers.remove(0) : answers.get(0);
+        }
         send(exchange, response.status(), response.body());
     }
 
@@ -142,5 +150,6 @@ final class FakeGoogle implements AutoCloseable {
     @Override
     public void close() {
         server.stop(0);
+        executor.shutdownNow();
     }
 }

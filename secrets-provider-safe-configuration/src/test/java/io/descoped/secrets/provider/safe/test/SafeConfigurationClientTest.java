@@ -16,9 +16,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -289,5 +291,49 @@ class SafeConfigurationClientTest {
                 executor.shutdownNow();
             }
         }
+    }
+
+    @Test
+    void readsAndWritesInFlightWhenTheClientIsClosedFinishOrSeeAClosedClient() throws Exception {
+        SecretManagerClient client = open(file("a=0000\n"));
+        callsRaceWithClose(client, () -> {
+            client.addVersion("a", "1111");
+            assertTrue(client.readString("a").matches("\\d{4}"));
+        });
+    }
+
+    /**
+     * Runs {@code call} on 8 threads until the client is closed under them. Every call must either succeed or, once
+     * the client is closed, throw {@link IllegalStateException}; anything else fails the test.
+     */
+    private static void callsRaceWithClose(SecretManagerClient client, Runnable call) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        CountDownLatch running = new CountDownLatch(8);
+        try {
+            List<Future<Integer>> futures = new ArrayList<>();
+            for (int t = 0; t < 8; t++) {
+                futures.add(executor.submit(() -> {
+                    int calls = 0;
+                    while (true) {
+                        try {
+                            call.run();
+                        } catch (IllegalStateException closed) {
+                            return calls;
+                        }
+                        if (++calls == 20) {
+                            running.countDown();
+                        }
+                    }
+                }));
+            }
+            assertTrue(running.await(30, TimeUnit.SECONDS), "every thread made 20 calls before the close");
+            client.close();
+            for (Future<Integer> future : futures) {
+                assertTrue(future.get(30, TimeUnit.SECONDS) >= 20);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThrows(IllegalStateException.class, call::run);
     }
 }
