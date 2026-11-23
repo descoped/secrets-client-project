@@ -31,7 +31,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- Reproducible builds: every jar entry gets this time, so the same tag builds the same bytes.
              release:prepare sets it to the release time. -->
-        <project.build.outputTimestamp>2026-11-17T19:00:47Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-11-23T19:52:33Z</project.build.outputTimestamp>
 
         <!-- Dependency versions. Kept as properties, not in dependencyManagement, so that importing
              secrets-client-bom (which inherits this POM) manages the secrets modules only. -->
@@ -66,9 +66,28 @@
         <tag>HEAD</tag>
     </scm>
 
+    <!-- SNAPSHOTs of other Descoped modules, read from maven.descoped.io during development. Releases come from Maven
+         Central, Maven's default; a release has no SNAPSHOT dependency (the central profile's enforcer refuses one).
+         The id is not descoped-snapshots: that server holds the publishing token, which must never go to this URL.
+         The POM has no distributionManagement: CI names the SNAPSHOT target on its command line, so a release
+         cannot go there. -->
+    <repositories>
+        <repository>
+            <id>descoped-snapshots-public</id>
+            <url>https://maven.descoped.io/</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
     <profiles>
         <!-- Releases to Maven Central through the Central Portal, by central-publishing-maven-plugin. Only releases:
-             SNAPSHOTs are not published.
+             the enforcer fails a SNAPSHOT version before anything is uploaded. SNAPSHOTs go to maven.descoped.io
+             only, from CI's snapshot job.
              Release (Ove approves each one): ./mvnw release:prepare release:perform -P secrets
              (`-P secrets` is no profile of this POM: ~/.mavenrc sees it and decrypts the Portal token for that run)
              Server `central` in ~/.m2/settings.xml holds the Portal user token and, for Maven 3.10, lists
@@ -80,8 +99,29 @@
                 <plugins>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-enforcer-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>only-releases-to-central</id>
+                                <goals>
+                                    <goal>enforce</goal>
+                                </goals>
+                                <configuration>
+                                    <rules>
+                                        <requireReleaseVersion>
+                                            <message>Only releases go to Maven Central; SNAPSHOTs go to maven.descoped.io (published by CI).</message>
+                                        </requireReleaseVersion>
+                                        <requireReleaseDeps>
+                                            <message>A release has no SNAPSHOT dependency.</message>
+                                        </requireReleaseDeps>
+                                    </rules>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
-                        <version>3.4.0</version>
                         <executions>
                             <execution>
                                 <id>attach-sources</id>
@@ -250,6 +290,25 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-deploy-plugin</artifactId>
                     <version>3.2.0</version>
+                </plugin>
+
+                <!-- source:jar-no-fork, help:evaluate and versions:set, used by CI's snapshot job -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-source-plugin</artifactId>
+                    <version>3.4.0</version>
+                </plugin>
+
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-help-plugin</artifactId>
+                    <version>3.6.0</version>
+                </plugin>
+
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>versions-maven-plugin</artifactId>
+                    <version>2.25.3</version>
                 </plugin>
 
                 <plugin>
