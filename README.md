@@ -56,8 +56,8 @@ src/it/consumer/run.sh           # JPMS smoke test on the module path and the cl
 - The Google provider's tests run against `FakeGoogle`, a local fake of the Secret Manager API and Google's token
   endpoint. `GoogleSecretManagerLiveTest` runs against a real project only when `SECRETS_GOOGLE_TEST_PROJECT` is set.
 - Pull requests run CI (build, tests, Javadoc, smoke test, SonarCloud) and an automated review. Releases are
-  published to Maven Central by hand. SNAPSHOTs of `master` are published by CI to `https://maven.descoped.io/`,
-  never to Maven Central (see [getting started](docs/getting-started.md)).
+  published to Maven Central by hand. SNAPSHOTs of `master`, and of a branch when run by hand
+  (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/`, never to Maven Central (see [getting started](docs/getting-started.md)).
 
 ## License
 
