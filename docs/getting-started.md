@@ -37,8 +37,22 @@ version.
 The BOM manages the secrets modules only. Third-party versions (google-auth, Jackson, dynamic-configuration) come
 through the modules' own dependencies.
 
-Releases are on Maven Central. Development versions (`-SNAPSHOT`) are not published; to try an unreleased change,
-build it locally with `./mvnw install`.
+Releases are on Maven Central. **No SNAPSHOT goes to Maven Central.** SNAPSHOTs of `master`, and of a branch when
+run by hand (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/` after a green build;
+releases never go there. To use one:
+
+```xml
+<repository>
+    <id>descoped-snapshots-public</id>
+    <url>https://maven.descoped.io/</url>
+    <releases><enabled>false</enabled></releases>
+    <snapshots><enabled>true</enabled></snapshots>
+</repository>
+```
+
+The id is `descoped-snapshots-public`, not `descoped-snapshots`: a server with that id holds the publishing token,
+and Maven would send it to this URL. A SNAPSHOT keeps only its newest build for long; depend on `X.Y.Z-SNAPSHOT`,
+never on a timestamped build.
 
 ## Modules
 
