@@ -83,7 +83,7 @@ jobs:
             --disallowedTools "Agent"
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: "Review this PR. Read .claude/CLAUDE.md first. Its Invariants section holds the never-violate rules: Java 17 baseline; one Maven reactor (parent secrets-client-project, the API, the providers and the BOM) released in lockstep with one version; every module a named JPMS module; providers registered with both provides in module-info and META-INF/services; secret values are never logged, never put in exception messages or toString, and byte or char arrays handed to or returned by a client are copies that the client wipes when it no longer needs them; a missing secret is reported the same way by every provider; always the latest stable dependency, plugin and action versions with old configuration removed; CI publishes nothing to Maven Central, neither SNAPSHOTs nor releases. Review against them as written there, and when you flag a violation name the rule. Also check correctness, thread safety, error handling, Javadoc on every public API element, that README.md and the user documentation in docs/ still match the behaviour, that new behaviour comes with tests, hardcoded values and leaked secrets. The tests are not run here; the CI workflow runs them on JDK 17, the baseline. Distinguish CRITICAL (must fix before merge) from SUGGESTION (non-blocking). Post one concise PR review with file:line citations. If the PR is clean, say so plainly; do not manufacture issues. Complete the entire review within this run and post the consolidated review before ending; never end the turn while any review pass is deferred, backgrounded or promised for later."
+          prompt: "Review this PR. Read .claude/CLAUDE.md first. Its Invariants section holds the never-violate rules. Review against them as written there, and when you flag a violation name the rule. Also check correctness, thread safety, error handling, Javadoc on every public API element, that README.md and the user documentation in docs/ still match the behaviour, that new behaviour comes with tests, hardcoded values and leaked secrets. The tests are not run here; the CI workflow runs them on the baseline JDK. Distinguish CRITICAL (must fix before merge) from SUGGESTION (non-blocking). Post one concise PR review with file:line citations. If the PR is clean, say so plainly; do not manufacture issues. Complete the entire review within this run and post the consolidated review before ending; never end the turn while any review pass is deferred, backgrounded or promised for later."
           track_progress: true
           allowed_bots: 'renovate[bot]'
 
@@ -135,11 +135,11 @@ jobs:
         with:
           fetch-depth: 1
 
-      # The baseline JDK, so a fix is built and tested where the oldest
-      # supported users run it.
+      # The baseline JDK from .java-version, as in ci.yml, so a fix is built and
+      # tested on the JDK users run.
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880  # v6.3.0
         with:
-          java-version: '17'
+          java-version-file: .java-version
           distribution: temurin
           cache: maven
 
