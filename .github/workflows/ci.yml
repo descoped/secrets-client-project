@@ -1,11 +1,11 @@
 name: CI
 
-# One job on JDK 17, the baseline: every build compiles with `release 17`, so the bytecode does not depend on the
-# JDK, and 17 is the oldest runtime users have. Every run: build, tests and Javadoc of every module, and the JPMS
-# consumer smoke test. Pushes to master and release tags, and pull requests from this repository, add coverage and
-# the SonarCloud analysis (not gating; pull requests from forks get no token). CI publishes nothing to Maven Central:
-# releases are signed and uploaded by hand (see .claude/CLAUDE.md). After a green build, a push to master, or a run
-# by hand on a branch, publishes SNAPSHOTs to maven.descoped.io (job snapshot), never a release.
+# One job on the baseline JDK, the version in .java-version (also the POM's java.version): the build compiles with
+# `release` set to it, and it is the oldest runtime users have. Every run: build, tests and Javadoc of every module, and
+# the JPMS consumer smoke test. Pushes to master and release tags, and pull requests from this repository, add coverage
+# and the SonarCloud analysis (not gating; pull requests from forks get no token). CI publishes nothing to Maven
+# Central: releases are signed and uploaded by hand (see .claude/CLAUDE.md). After a green build, a push to master, or a
+# run by hand on a branch, publishes SNAPSHOTs to maven.descoped.io (job snapshot), never a release.
 on:
   push:
     branches: [master]
@@ -41,7 +41,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build (JDK 17)
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -56,7 +56,7 @@ jobs:
 
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880  # v6.3.0
         with:
-          java-version: '17'
+          java-version-file: .java-version
           distribution: temurin
           cache: maven
 
@@ -107,7 +107,7 @@ jobs:
 
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880  # v6.3.0
         with:
-          java-version: '17'
+          java-version-file: .java-version
           distribution: temurin
           cache: maven
 
