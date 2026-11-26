@@ -57,6 +57,8 @@ public final class HeapDump {
         print(crc.getValue());
     }
 
+    /** Standard output is how the subject reports to {@link HeapCanary}, which reads it. */
+    @SuppressWarnings("java:S106")
     private static void print(long crc) {
         System.out.println(CHECKSUM + HexFormat.of().toHexDigits((int) crc));
     }
@@ -68,6 +70,7 @@ public final class HeapDump {
      * @param file the dump file, which must not exist
      * @throws IOException if the dump cannot be written
      */
+    @SuppressWarnings("java:S106")
     public static void dump(Path file) throws IOException {
         HotSpotDiagnosticMXBean bean = ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class);
         bean.dumpHeap(file.toString(), false);

@@ -27,8 +27,23 @@ public final class CanaryScan {
 
     private static final long BASE = 1_000_003L;
 
-    /** A fragment and the encoding it comes from. */
-    private record Pattern(String encoding, byte[] bytes) {
+    /** A fragment and the encoding it comes from. Compared by identity: fragments are only ever looked up by hash. */
+    private static final class Pattern {
+        private final String encoding;
+        private final byte[] bytes;
+
+        Pattern(String encoding, byte[] bytes) {
+            this.encoding = encoding;
+            this.bytes = bytes;
+        }
+
+        String encoding() {
+            return encoding;
+        }
+
+        byte[] bytes() {
+            return bytes;
+        }
     }
 
     /**
@@ -134,21 +149,25 @@ public final class CanaryScan {
             h = h * BASE + (buffer.get(i) & 0xFF);
         }
         for (int i = 0; ; i++) {
-            List<Pattern> candidates = patterns.get(h);
-            if (candidates != null) {
-                for (Pattern pattern : candidates) {
-                    if (matches(buffer, i, pattern.bytes())) {
-                        Finding finding = new Finding(pattern.encoding(), base + i);
-                        if (!findings.contains(finding)) {
-                            findings.add(finding);
-                        }
-                    }
-                }
-            }
+            check(buffer, i, h, base, findings);
             if (i + FRAGMENT >= length) {
                 return;
             }
             h = (h - (buffer.get(i) & 0xFF) * power) * BASE + (buffer.get(i + FRAGMENT) & 0xFF);
+        }
+    }
+
+    /** Records every fragment whose hash is {@code h} and that is at {@code buffer[i]}. */
+    private void check(MappedByteBuffer buffer, int i, long h, long base, List<Finding> findings) {
+        List<Pattern> candidates = patterns.get(h);
+        if (candidates == null) {
+            return;
+        }
+        for (Pattern pattern : candidates) {
+            Finding finding = new Finding(pattern.encoding(), base + i);
+            if (matches(buffer, i, pattern.bytes()) && !findings.contains(finding)) {
+                findings.add(finding);
+            }
         }
     }
 

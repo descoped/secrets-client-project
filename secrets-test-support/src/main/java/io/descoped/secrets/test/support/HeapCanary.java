@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
@@ -20,7 +21,8 @@ import java.util.zip.CRC32C;
  * subject) gets the file's path, reads it only through the code under test, reports a checksum of what it read and
  * dumps its whole heap, garbage included ({@link HeapDump}). The dump is then searched for the canary as it would
  * look in any copy: its bytes (also a Latin-1 {@code String}), UTF-16 in either byte order (a {@code char[]} or a
- * UTF-16 {@code String}), hex in either case, and Base64 and Base64url at each of the three alignments. Fragments of
+ * UTF-16 {@code String}; a heap dump stores them big-endian, and for an ASCII canary the two byte orders match the
+ * same data one byte apart), hex in either case, and Base64 and Base64url at each of the three alignments. Fragments of
  * {@value CanaryScan#FRAGMENT} bytes from the start, middle and end of each form are searched, so a partial copy is
  * found too.
  *
@@ -39,16 +41,19 @@ public final class HeapCanary {
     public static final int LENGTH = 48;
 
     private static final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    private static final int TIMEOUT_SECONDS = 120;
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final Duration TIMEOUT = Duration.ofMinutes(2);
 
     private final Path dir;
     private final byte[] canary;
     private final Path file;
+    private final Duration timeout;
 
-    private HeapCanary(Path dir, byte[] canary, Path file) {
+    private HeapCanary(Path dir, byte[] canary, Path file, Duration timeout) {
         this.dir = dir;
         this.canary = canary;
         this.file = file;
+        this.timeout = timeout;
     }
 
     /**
@@ -59,13 +64,22 @@ public final class HeapCanary {
      * @throws IOException if the file cannot be written
      */
     public static HeapCanary create(Path dir) throws IOException {
-        SecureRandom random = new SecureRandom();
         byte[] canary = new byte[LENGTH];
         for (int i = 0; i < LENGTH; i++) {
-            canary[i] = (byte) ALPHABET.charAt(random.nextInt(ALPHABET.length()));
+            canary[i] = (byte) ALPHABET.charAt(RANDOM.nextInt(ALPHABET.length()));
         }
         Path file = Files.write(dir.resolve("canary.secret"), canary);
-        return new HeapCanary(dir, canary, file);
+        return new HeapCanary(dir, canary, file, TIMEOUT);
+    }
+
+    /**
+     * The same canary, with another limit on how long a subject may run (two minutes by default).
+     *
+     * @param limit the limit
+     * @return the canary with that limit
+     */
+    public HeapCanary timeout(Duration limit) {
+        return new HeapCanary(dir, canary, file, limit);
     }
 
     /**
@@ -89,7 +103,14 @@ public final class HeapCanary {
      * @throws InterruptedException if interrupted while waiting for the child
      */
     public Run run(String main, String... args) throws IOException, InterruptedException {
-        Path dump = dir.resolve("heap-" + System.nanoTime() + ".hprof");
+        String modulePath = System.getProperty("jdk.module.path");
+        if (modulePath == null) {
+            throw new IllegalStateException("HeapCanary runs the subject from the module path: run the test as a named"
+                    + " module");
+        }
+        long run = System.nanoTime();
+        Path dump = dir.resolve("heap-" + run + ".hprof");
+        Path log = dir.resolve("subject-" + run + ".log");
         List<String> command = new ArrayList<>();
         command.add(ProcessHandle.current().info().command()
                 .orElse(Path.of(System.getProperty("java.home"), "bin", "java").toString()));
@@ -101,16 +122,19 @@ public final class HeapCanary {
                 "--enable-native-access=io.descoped.secrets.api",
                 "-Xmx128m",
                 "-XX:-CreateCoredumpOnCrash", "-XX:ErrorFile=" + dir.resolve("hs_err_%p.log"),
-                "--module-path", System.getProperty("jdk.module.path"),
+                "--module-path", modulePath,
                 "--module", main,
                 file.toString(), dump.toString()));
         command.addAll(Arrays.asList(args));
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            throw new AssertionError("The subject did not finish within " + TIMEOUT_SECONDS + " seconds:\n" + output);
+        // Output to a file, not a pipe: reading a pipe would block until the subject exits, and the timeout would
+        // never apply.
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+        if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            process.destroyForcibly().waitFor();
+            throw new AssertionError("The subject did not finish within " + timeout + ":\n"
+                    + Files.readString(log, StandardCharsets.UTF_8));
         }
+        String output = Files.readString(log, StandardCharsets.UTF_8);
         List<CanaryScan.Finding> findings = Files.exists(dump) ? CanaryScan.of(canary).scan(dump) : List.of();
         return new Run(process.exitValue(), output, expectedChecksum(), Files.exists(dump), findings);
     }

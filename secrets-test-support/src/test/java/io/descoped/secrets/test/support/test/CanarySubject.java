@@ -28,10 +28,13 @@ public final class CanarySubject {
     private CanarySubject() {
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         Path file = Path.of(args[0]);
         Path dump = Path.of(args[1]);
         String mode = args[2];
+        if (mode.equals("hang")) {
+            Thread.sleep(Long.MAX_VALUE);
+        }
         if (mode.startsWith("leak-")) {
             ByteBuffer value = readDirect(file);
             HeapDump.checksum(value);
@@ -87,7 +90,9 @@ public final class CanarySubject {
         try (FileChannel channel = FileChannel.open(file)) {
             ByteBuffer buffer = ByteBuffer.allocateDirect((int) channel.size());
             while (buffer.hasRemaining()) {
-                channel.read(buffer);
+                if (channel.read(buffer) < 0) {
+                    throw new IllegalStateException("The file is shorter than it was");
+                }
             }
             return buffer.flip();
         }
@@ -102,7 +107,8 @@ public final class CanarySubject {
                 yield copy;
             }
             case "leak-utf16le" -> {
-                // A char[] is in native byte order, little-endian on x86_64 and aarch64.
+                // A heap dump stores a char[] big-endian. For an ASCII canary the UTF-16LE fragments match that
+                // one byte in, so this is found as both; the label says which pattern matched, not the byte order.
                 char[] chars = new char[n];
                 for (int i = 0; i < n; i++) {
                     chars[i] = (char) value.get(i);

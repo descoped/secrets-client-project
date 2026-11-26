@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -74,6 +75,15 @@ class CanaryHarnessTest {
         HeapCanary.Run run = HeapCanary.create(dir).run(SUBJECT, "no-such-mode");
         AssertionError e = assertThrows(AssertionError.class, run::assertClean);
         assertTrue(e.getMessage().startsWith("The subject failed"), e.getMessage());
+    }
+
+    @Test
+    void aSubjectThatHangsIsStoppedAtTheTimeout() throws Exception {
+        HeapCanary canary = HeapCanary.create(dir).timeout(Duration.ofSeconds(3));
+        long start = System.nanoTime();
+        AssertionError e = assertThrows(AssertionError.class, () -> canary.run(SUBJECT, "hang"));
+        assertTrue(e.getMessage().startsWith("The subject did not finish within PT3S"), e.getMessage());
+        assertTrue(System.nanoTime() - start < Duration.ofSeconds(30).toNanos());
     }
 
     @Test
