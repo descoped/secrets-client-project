@@ -7,9 +7,6 @@ import io.descoped.secrets.api.SecretManagerException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.KeyPairGenerator;
-import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
 import java.util.Map;
 
 /**
@@ -46,51 +43,28 @@ public final class Main {
             check("dynamic-configuration", "42", client.readString("answer"));
         }
 
-        // The Google provider and its automatic modules (google-auth and its dependencies) must resolve and load: a
-        // real client is built from a generated service-account key, which google-auth parses. No request is sent.
-        Path key = Files.createTempFile("service-account", ".json");
-        try {
-            Files.writeString(key, serviceAccountKey());
-            SecretManagerClient.create(Map.of(
-                    "secrets.provider", "google-secret-manager",
-                    "secrets.project-id", "smoke-test",
-                    "secrets.service-account-key-path", key.toString(),
-                    "secrets.endpoint", "http://127.0.0.1:1")).close();
-            System.out.println("OK " + mode + " google-secret-manager client built");
-        } catch (SecretManagerException e) {
-            fail("google-secret-manager: " + e);
-        } finally {
-            Files.deleteIfExists(key);
-        }
+        // The Google provider must resolve and load, with no dependency but the API: a client that would take its
+        // token from a metadata server on loopback is built; no request is sent.
+        SecretManagerClient.create(Map.of(
+                "secrets.provider", "google-secret-manager",
+                "secrets.project-id", "smoke-test",
+                "secrets.credentials", "metadata",
+                "secrets.metadata-endpoint", "http://127.0.0.1:1",
+                "secrets.endpoint", "http://127.0.0.1:1")).close();
+        System.out.println("OK " + mode + " google-secret-manager client built");
 
-        // A missing key file is reported as such, not as a class-loading or module error.
+        // A missing credentials file is reported as such, not as a class-loading or module error.
         try {
             SecretManagerClient.create(Map.of(
                     "secrets.provider", "google-secret-manager",
                     "secrets.project-id", "smoke-test",
-                    "secrets.service-account-key-path", "/nonexistent/key.json")).close();
-            fail("google-secret-manager: created a client without a key file");
+                    "secrets.credentials-path", "/nonexistent/credentials.json")).close();
+            fail("google-secret-manager: created a client without a credentials file");
         } catch (SecretManagerException e) {
-            if (!e.getMessage().startsWith("Cannot read the service-account key")) {
+            if (!e.getMessage().startsWith("Cannot read the Google credentials file")) {
                 fail("google-secret-manager: " + e);
             }
-            System.out.println("OK " + mode + " google-secret-manager missing key reported");
-        }
-    }
-
-    private static String serviceAccountKey() {
-        try {
-            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
-            generator.initialize(2048);
-            String pem = "-----BEGIN PRIVATE KEY-----\\n"
-                    + Base64.getMimeEncoder(64, new byte[]{'\n'})
-                    .encodeToString(generator.generateKeyPair().getPrivate().getEncoded()).replace("\n", "\\n")
-                    + "\\n-----END PRIVATE KEY-----\\n";
-            return "{\"type\":\"service_account\",\"project_id\":\"smoke-test\",\"private_key_id\":\"k\","
-                    + "\"private_key\":\"" + pem + "\",\"client_email\":\"smoke@smoke-test.iam.gserviceaccount.com\","
-                    + "\"client_id\":\"1\",\"token_uri\":\"http://127.0.0.1:1/token\"}";
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
+            System.out.println("OK " + mode + " google-secret-manager missing credentials reported");
         }
     }
 

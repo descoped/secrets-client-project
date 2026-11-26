@@ -16,7 +16,7 @@ true when behaviour changes.
 | `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
 | `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | read-only, on `io.descoped.config:dynamic-configuration` 3.x, for tests and migration |
-| `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API, google-auth (Application Default Credentials), Jackson 3 `jackson-core` |
+| `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory: its own HTTP/1.1 client (`SSLEngine`), JSON reader and Base64; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
 (old tags prefixed with the module name, e.g. `secrets-client-api/2.0.3`). 3.0.0 (2026-11-17) is the first release
@@ -43,9 +43,9 @@ change to the API or to a provider's documented behaviour needs a new major vers
   heap array, a `String` or a heap `ByteBuffer`, except the hand-over copy a caller asks for, wiped when its callback
   returns. No runtime dependency that holds them on the heap. A canary heap-dump test proves each read and write path.
   Code from 3.x does not meet this yet; new code must. Accepted interim exceptions, until the plan removes them:
-  `read` in the Google provider (rebuilt in phase 4) and in dynamic-configuration (removed in phase 6) copies
-  `readBytes` into guarded memory, and the default `addVersion(String, Secret)` hands a wiped heap copy to
-  `addVersion(String, byte[])`.
+  `read` in dynamic-configuration (removed in phase 6) copies `readBytes` into guarded memory, the default
+  `addVersion(String, Secret)` hands a wiped heap copy to `addVersion(String, byte[])`, and the JDK's TLS
+  (`SSLEngine`) is unproven until phase 5's canary test through TLS.
 - **One contract for every provider.** A missing secret, a closed client and a write the provider cannot do are
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and
@@ -76,8 +76,9 @@ change to the API or to a provider's documented behaviour needs a new major vers
   until its canary test passes. The harness proves itself in its own tests (guarded memory is clean, a leak in each
   encoding is found). `secrets-test-support` is never published (`maven.deploy.skip`, `skipPublishing`) and is not in
   the BOM.
-- The Google Secret Manager tests run against `FakeGoogle`, a local server that also issues OAuth tokens for a
-  generated service-account key. `GoogleSecretManagerLiveTest` calls Google only when `SECRETS_GOOGLE_TEST_PROJECT`
+- The Google Secret Manager tests run against `FakeGoogle`, a local server (http, or https with keytool-made
+  certificates in `GoogleSecretManagerTlsTest`) that also serves the OAuth refresh-token grant and the metadata
+  server's token. `GoogleSecretManagerLiveTest` calls Google only when `SECRETS_GOOGLE_TEST_PROJECT`
   is set; it is not run in CI.
 - Each module's tests are a named module of their own, `<module>.test` (`src/test/java/module-info.java`), in package
   `<package>.test`. They require `io.descoped.secrets.api` and reach a provider only through
@@ -98,7 +99,7 @@ change to the API or to a provider's documented behaviour needs a new major vers
 ./mvnw verify                    # compile with -Xlint:all -Werror, tests (JUnit 6)
 ./mvnw verify javadoc:javadoc    # plus Javadoc with doclint, warnings fail the build
 src/it/consumer/run.sh           # JPMS smoke test: an application that requires only the API, against every
-                                 # provider, on the module path (Google's dependencies as automatic modules) and
-                                 # the class path; jdeps --check on the modules with named dependencies only
+                                 # provider, on the module path and the class path, with native access;
+                                 # jdeps --check on the modules with named dependencies only
 ./mvnw verify -P coverage        # JaCoCo report per module in <module>/target/site/jacoco
 ```

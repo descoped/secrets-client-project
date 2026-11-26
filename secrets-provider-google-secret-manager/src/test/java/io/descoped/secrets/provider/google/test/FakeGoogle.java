@@ -2,18 +2,21 @@ package io.descoped.secrets.provider.google.test;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsServer;
 
+import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.KeyPairGenerator;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,14 +26,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * A local stand-in for Google: an OAuth token endpoint and Secret Manager responses set per request, so the provider
- * runs its real code, google-auth included, against it.
+ * A local stand-in for Google: the OAuth token endpoint (refresh-token grant), the metadata server's token, and
+ * Secret Manager responses set per request, over http or https, so the provider runs its real code against it.
  */
 final class FakeGoogle implements AutoCloseable {
 
-    /**
-     * A request the fake received.
-     */
+    static final String REFRESH_TOKEN = "refresh-1/abc+def";
+    static final String CLIENT_ID = "client-1.apps.googleusercontent.com";
+    static final String CLIENT_SECRET = "client secret&=";
+
+    /** A Secret Manager request the fake received. */
     record Request(String method, String path, String authorization, byte[] body) {
 
         String bodyText() {
@@ -38,22 +43,53 @@ final class FakeGoogle implements AutoCloseable {
         }
     }
 
-    /**
-     * A canned response.
-     */
-    record Response(int status, String body) {
+    /** A canned response: sent chunked, or after a delay, if asked. */
+    record Response(int status, String body, boolean chunked, long delayMillis) {
+
+        Response(int status, String body) {
+            this(status, body, false, 0);
+        }
+
+        Response asChunks() {
+            return new Response(status, body, true, delayMillis);
+        }
+
+        Response delayed(long millis) {
+            return new Response(status, body, chunked, millis);
+        }
     }
 
     private final HttpServer server;
+    private final boolean tls;
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private final Map<String, List<Response>> responses = new ConcurrentHashMap<>();
     final List<Request> requests = new CopyOnWriteArrayList<>();
+    final List<Map<String, String>> tokenRequests = new CopyOnWriteArrayList<>();
+    final List<String> metadataFlavors = new CopyOnWriteArrayList<>();
     final AtomicInteger tokens = new AtomicInteger();
     volatile int tokenLifetimeSeconds = 3600;
+    /** The access token to issue; {@code token-<n>} when {@code null}. */
+    volatile String accessToken;
+    /** The refresh token the OAuth endpoint accepts. */
+    volatile String refreshToken = REFRESH_TOKEN;
 
     FakeGoogle() throws IOException {
-        server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        this(null);
+    }
+
+    /** Serves https with {@code context} when it is not {@code null}. */
+    FakeGoogle(SSLContext context) throws IOException {
+        InetSocketAddress address = new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
+        if (context == null) {
+            server = HttpServer.create(address, 0);
+        } else {
+            HttpsServer https = HttpsServer.create(address, 0);
+            https.setHttpsConfigurator(new HttpsConfigurator(context));
+            server = https;
+        }
+        tls = context != null;
         server.createContext("/token", this::token);
+        server.createContext("/computeMetadata/v1/instance/service-accounts/default/token", this::metadata);
         server.createContext("/v1/", this::secretManager);
         // Several threads, like a real server, so concurrent requests from a client overlap here too.
         server.setExecutor(executor);
@@ -61,12 +97,14 @@ final class FakeGoogle implements AutoCloseable {
     }
 
     String endpoint() {
-        return "http://127.0.0.1:" + server.getAddress().getPort();
+        return (tls ? "https" : "http") + "://127.0.0.1:" + server.getAddress().getPort();
     }
 
-    /**
-     * Answers {@code method path} (path with query) with the given responses, one per request, the last repeated.
-     */
+    String tokenEndpoint() {
+        return endpoint() + "/token";
+    }
+
+    /** Answers {@code method path} (path with query) with the given responses, one per request, the last repeated. */
     void on(String method, String path, Response... answers) {
         responses.put(method + " " + path, new ArrayList<>(List.of(answers)));
     }
@@ -75,11 +113,48 @@ final class FakeGoogle implements AutoCloseable {
         return requests.stream().filter(r -> r.method().equals(method) && r.path().equals(path)).toList();
     }
 
-    private void token(HttpExchange exchange) throws IOException {
-        exchange.getRequestBody().readAllBytes();
+    /** Writes an {@code authorized_user} credentials file, as gcloud does, for this fake's refresh token. */
+    Path credentialsFile(Path dir) throws IOException {
+        Path file = dir.resolve("application_default_credentials.json");
+        Files.writeString(file, "{\n  \"account\": \"\",\n  \"client_id\": \"" + CLIENT_ID + "\",\n"
+                + "  \"client_secret\": \"" + CLIENT_SECRET + "\",\n  \"quota_project_id\": \"test-project\",\n"
+                + "  \"refresh_token\": \"" + refreshToken.replace("/", "\\/") + "\",\n"
+                + "  \"type\": \"authorized_user\",\n  \"universe_domain\": \"googleapis.com\"\n}\n");
+        return file;
+    }
+
+    private String issue() {
         int n = tokens.incrementAndGet();
-        send(exchange, 200, "{\"access_token\":\"token-" + n + "\",\"expires_in\":" + tokenLifetimeSeconds
-                + ",\"token_type\":\"Bearer\"}");
+        String token = accessToken != null ? accessToken : "token-" + n;
+        return "{\"access_token\":\"" + token + "\",\"expires_in\":" + tokenLifetimeSeconds
+                + ",\"scope\":\"https://www.googleapis.com/auth/cloud-platform\",\"token_type\":\"Bearer\"}";
+    }
+
+    private void token(HttpExchange exchange) throws IOException {
+        Map<String, String> form = new HashMap<>();
+        for (String pair : new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.US_ASCII)
+                .split("&")) {
+            int eq = pair.indexOf('=');
+            form.put(URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8),
+                    URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8));
+        }
+        tokenRequests.add(form);
+        if (!"refresh_token".equals(form.get("grant_type")) || !refreshToken.equals(form.get("refresh_token"))
+                || !CLIENT_ID.equals(form.get("client_id")) || !CLIENT_SECRET.equals(form.get("client_secret"))) {
+            send(exchange, new Response(400, "{\"error\":\"invalid_grant\",\"error_description\":\"Bad Request\"}"));
+            return;
+        }
+        send(exchange, new Response(200, issue()));
+    }
+
+    private void metadata(HttpExchange exchange) throws IOException {
+        String flavor = exchange.getRequestHeaders().getFirst("Metadata-Flavor");
+        metadataFlavors.add(String.valueOf(flavor));
+        if (!"Google".equals(flavor)) {
+            send(exchange, new Response(403, "Missing Metadata-Flavor:Google header."));
+            return;
+        }
+        send(exchange, new Response(200, issue()).asChunks());
     }
 
     private void secretManager(HttpExchange exchange) throws IOException {
@@ -93,48 +168,41 @@ final class FakeGoogle implements AutoCloseable {
                 exchange.getRequestHeaders().getFirst("Authorization"), body));
         List<Response> answers = responses.get(exchange.getRequestMethod() + " " + path);
         if (answers == null || answers.isEmpty()) {
-            send(exchange, 500, "{\"error\":{\"code\":500,\"status\":\"INTERNAL\",\"message\":\"no fake for "
-                    + exchange.getRequestMethod() + " " + path + "\"}}");
+            send(exchange, new Response(500, "{\"error\":{\"code\":500,\"status\":\"INTERNAL\",\"message\":\"no fake for "
+                    + exchange.getRequestMethod() + " " + path + "\"}}"));
             return;
         }
         Response response;
         synchronized (answers) {
             response = answers.size() > 1 ? answers.remove(0) : answers.get(0);
         }
-        send(exchange, response.status(), response.body());
+        send(exchange, response);
     }
 
-    private static void send(HttpExchange exchange, int status, String body) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+    private static void send(HttpExchange exchange, Response response) throws IOException {
+        if (response.delayMillis() > 0) {
+            try {
+                Thread.sleep(response.delayMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        byte[] bytes = response.body().getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");
-        exchange.sendResponseHeaders(status, bytes.length);
+        exchange.sendResponseHeaders(response.status(), response.chunked() ? 0 : bytes.length == 0 ? -1 : bytes.length);
         try (OutputStream out = exchange.getResponseBody()) {
-            out.write(bytes);
+            if (response.chunked()) {
+                // Several chunks, so that a value spans them.
+                int step = Math.max(1, bytes.length / 3);
+                for (int i = 0; i < bytes.length; i += step) {
+                    out.write(bytes, i, Math.min(step, bytes.length - i));
+                    out.flush();
+                }
+            } else {
+                out.write(bytes);
+            }
         }
-    }
-
-    /**
-     * Writes a service-account key file with a fresh RSA key whose token endpoint is this fake.
-     */
-    Path serviceAccountKey(Path dir) throws IOException {
-        String pem;
-        try {
-            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
-            generator.initialize(2048);
-            byte[] pkcs8 = generator.generateKeyPair().getPrivate().getEncoded();
-            pem = "-----BEGIN PRIVATE KEY-----\\n"
-                    + Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII))
-                    .encodeToString(pkcs8).replace("\n", "\\n")
-                    + "\\n-----END PRIVATE KEY-----\\n";
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
-        String json = "{\"type\":\"service_account\",\"project_id\":\"test-project\",\"private_key_id\":\"k1\","
-                + "\"private_key\":\"" + pem + "\",\"client_email\":\"tester@test-project.iam.gserviceaccount.com\","
-                + "\"client_id\":\"1\",\"token_uri\":\"" + endpoint() + "/token\"}";
-        Path file = dir.resolve("service-account.json");
-        Files.writeString(file, json);
-        return file;
     }
 
     static String accessResponse(byte[] value, long crc) {

@@ -13,24 +13,7 @@
     <packaging>jar</packaging>
 
     <name>Secrets Provider Google Secret Manager</name>
-    <description>SecretManagerClient provider for Google Secret Manager, through its REST API.</description>
-
-    <build>
-        <plugins>
-            <!-- google-auth-library is an automatic module (no module-info), which javac reports with
-                 -Xlint:requires-automatic; that is expected here, every other lint warning still fails. -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <compilerArgs combine.self="override">
-                        <arg>-Xlint:all,-requires-automatic</arg>
-                        <arg>-Werror</arg>
-                    </compilerArgs>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
+    <description>SecretManagerClient provider for Google Secret Manager, through its REST API, with secrets and access tokens in guarded memory.</description>
 
     <dependencies>
         <dependency>
@@ -40,42 +23,10 @@
         </dependency>
 
         <dependency>
-            <groupId>com.google.auth</groupId>
-            <artifactId>google-auth-library-oauth2-http</artifactId>
-            <version>${google-auth.version}</version>
-            <!-- Nothing in google-auth or google-http-client 2.x references these: Apache HttpClient 4 (end of life)
-                 and commons-codec came along for google-http-client's optional Apache transport, which this
-                 provider never uses (google-auth's default is NetHttpTransport); listenablefuture is an empty
-                 placeholder jar. jsr305 is a split package on the module path. src/it/consumer/run.sh checks
-                 that the provider still loads on the module path and the class path without them. -->
-            <exclusions>
-                <exclusion>
-                    <groupId>com.google.code.findbugs</groupId>
-                    <artifactId>jsr305</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.httpcomponents</groupId>
-                    <artifactId>httpclient</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.httpcomponents</groupId>
-                    <artifactId>httpcore</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>commons-codec</groupId>
-                    <artifactId>commons-codec</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.google.guava</groupId>
-                    <artifactId>listenablefuture</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>tools.jackson.core</groupId>
-            <artifactId>jackson-core</artifactId>
-            <version>${jackson.version}</version>
+            <groupId>io.descoped.secrets</groupId>
+            <artifactId>secrets-test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <dependency>

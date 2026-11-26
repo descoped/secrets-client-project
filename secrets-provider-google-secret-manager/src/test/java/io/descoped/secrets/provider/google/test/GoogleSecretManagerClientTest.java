@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -55,7 +56,8 @@ class GoogleSecretManagerClientTest {
         Map<String, String> configuration = new HashMap<>(Map.of(
                 "secrets.provider", "google-secret-manager",
                 "secrets.project-id", "test-project",
-                "secrets.service-account-key-path", google.serviceAccountKey(dir).toString(),
+                "secrets.credentials-path", google.credentialsFile(dir).toString(),
+                "secrets.token-endpoint", google.tokenEndpoint(),
                 "secrets.endpoint", google.endpoint()));
         configuration.putAll(extra);
         return SecretManagerClient.create(configuration);
@@ -281,21 +283,176 @@ class GoogleSecretManagerClientTest {
     }
 
     @Test
-    void theKeyFileMustBeAServiceAccountKey() throws IOException {
-        java.nio.file.Path external = dir.resolve("external.json");
-        java.nio.file.Files.writeString(external, "{\"type\":\"external_account\",\"audience\":\"a\","
-                + "\"subject_token_type\":\"t\",\"token_url\":\"https://sts.googleapis.com/v1/token\","
-                + "\"credential_source\":{\"executable\":{\"command\":\"/bin/echo\"}}}");
-        Map<String, String> configuration = Map.of("secrets.provider", "google-secret-manager",
-                "secrets.project-id", "p", "secrets.service-account-key-path", external.toString());
-        assertThrows(SecretManagerException.class, () -> SecretManagerClient.create(configuration));
+    void onlyAuthorizedUserCredentialsAreAccepted() throws IOException {
+        Map<String, String> types = Map.of(
+                "service_account", "{\"type\":\"service_account\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\"}",
+                "external_account", "{\"type\":\"external_account\",\"credential_source\":{\"executable\":"
+                        + "{\"command\":\"/bin/echo\"}}}",
+                "no known type", "{\"type\":\"hunter2 hunter2\"}");
+        for (Map.Entry<String, String> type : types.entrySet()) {
+            Path file = dir.resolve(type.getKey().replace(' ', '-') + ".json");
+            Files.writeString(file, type.getValue());
+            SecretManagerException e = assertThrows(SecretManagerException.class,
+                    () -> open(Map.of("secrets.credentials-path", file.toString())), type.getKey());
+            assertTrue(e.getMessage().contains(type.getKey()), e.getMessage());
+            assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
+        }
+        Path incomplete = dir.resolve("incomplete.json");
+        Files.writeString(incomplete, "{\"type\":\"authorized_user\",\"client_id\":\"c\",\"client_secret\":\"s\"}");
+        SecretManagerException e = assertThrows(SecretManagerException.class,
+                () -> open(Map.of("secrets.credentials-path", incomplete.toString())));
+        assertTrue(e.getMessage().endsWith("has no refresh_token"), e.getMessage());
+        Path broken = dir.resolve("broken.json");
+        Files.writeString(broken, "{\"type\":\"authorized_user\",\"refresh_token\":\"hunter2");
+        e = assertThrows(SecretManagerException.class, () -> open(Map.of("secrets.credentials-path", broken.toString())));
+        assertTrue(e.getMessage().endsWith("is not valid JSON"), e.getMessage());
+        assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
+        Path missing = dir.resolve("missing.json");
+        assertThrows(SecretManagerException.class, () -> open(Map.of("secrets.credentials-path", missing.toString())));
+        IllegalArgumentException removed = assertThrows(IllegalArgumentException.class,
+                () -> open(Map.of("secrets.service-account-key-path", missing.toString())));
+        assertTrue(removed.getMessage().contains("no longer supported"), removed.getMessage());
+    }
+
+    @Test
+    void theRefreshTokenIsExchangedForAnAccessToken() throws IOException {
+        google.on("GET", SECRETS + "/a/versions/latest:access", access("1"));
+        try (SecretManagerClient client = open()) {
+            assertEquals("1", client.readString("a"));
+        }
+        assertEquals(Map.of("grant_type", "refresh_token", "client_id", FakeGoogle.CLIENT_ID,
+                "client_secret", FakeGoogle.CLIENT_SECRET, "refresh_token", FakeGoogle.REFRESH_TOKEN),
+                google.tokenRequests.get(0));
+        assertEquals("Bearer token-1", google.requests.get(0).authorization());
+    }
+
+    @Test
+    void aRefusedRefreshTokenIsReportedWithTheOAuthError() throws IOException {
+        try (SecretManagerClient client = open()) {
+            // The file was read with the old token; the token is first exchanged on the first request.
+            google.refreshToken = "another";
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("a"));
+            assertTrue(e.getMessage().startsWith("Cannot get an access token from the OAuth endpoint 127.0.0.1:"),
+                    e.getMessage());
+            assertTrue(e.getMessage().endsWith(": HTTP 400 invalid_grant"), e.getMessage());
+        }
+        assertTrue(google.requests.isEmpty());
+    }
+
+    @Test
+    void theMetadataServerGivesTheTokenOnGoogleCloud() throws IOException {
+        google.on("GET", SECRETS + "/a/versions/latest:access", access("1"));
+        Map<String, String> metadata = Map.of(
+                "secrets.provider", "google-secret-manager",
+                "secrets.project-id", "test-project",
+                "secrets.credentials", "metadata",
+                "secrets.metadata-endpoint", google.endpoint(),
+                "secrets.endpoint", google.endpoint());
+        try (SecretManagerClient client = SecretManagerClient.create(metadata)) {
+            assertEquals("1", client.readString("a"));
+            assertEquals("1", client.readString("a"));
+        }
+        assertEquals(List.of("Google"), google.metadataFlavors, "one token, asked for with the header");
+        assertEquals("Bearer token-1", google.requests.get(1).authorization());
+        assertTrue(google.tokenRequests.isEmpty());
+    }
+
+    @Test
+    void largeValuesChunkedResponsesAndEscapesAreRead() throws IOException {
+        byte[] large = new byte[64 * 1024];
+        new java.util.Random(7).nextBytes(large);
+        google.on("GET", SECRETS + "/large/versions/latest:access",
+                new Response(200, FakeGoogle.accessResponse(large, crc(large))));
+        google.on("GET", SECRETS + "/chunked/versions/latest:access",
+                new Response(200, FakeGoogle.accessResponse(large, crc(large))).asChunks());
+        byte[] slashes = {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF};
+        String escaped = FakeGoogle.accessResponse(slashes, crc(slashes)).replace("/", "\\/")
+                .replace("\"name\"", "\"n\\u0061me\"");
+        google.on("GET", SECRETS + "/escaped/versions/latest:access", new Response(200, escaped));
+        byte[] empty = new byte[0];
+        google.on("GET", SECRETS + "/empty/versions/latest:access",
+                new Response(200, "{\"payload\":{\"data\":\"\"}}").asChunks());
+        try (SecretManagerClient client = open()) {
+            assertArrayEquals(large, client.readBytes("large"));
+            assertArrayEquals(large, client.readBytes("chunked"));
+            assertArrayEquals(slashes, client.readBytes("escaped"));
+            assertArrayEquals(empty, client.readBytes("empty"));
+        }
+    }
+
+    @Test
+    void anyValidJsonAroundThePayloadAndUnpaddedBase64AreRead() throws IOException {
+        byte[] hi = "hi".getBytes(StandardCharsets.UTF_8);
+        String valid = """
+                 { "name" : "projects/1/secrets/a/versions/1",
+                   "k": 0, "extra": [1, -2.5e+3, 0.5E-1, true, false, null, {"a": []}, [], {}],
+                   "u": "\\u00e5\\ud83d\\ude00\\"\\\\\\b\\f\\n\\r\\t",
+                   "payload": {"data": "aGk", "dataCrc32c": "%d"} }
+                """.formatted(crc(hi));
+        google.on("GET", SECRETS + "/a/versions/latest:access", new Response(200, valid));
+        byte[] hello = "hello".getBytes(StandardCharsets.UTF_8);
+        google.on("GET", SECRETS + "/b/versions/latest:access",
+                new Response(200, "{\"payload\":{\"data\":\"aGVsbG8\"}}"));
+        try (SecretManagerClient client = open()) {
+            assertArrayEquals(hi, client.readBytes("a"));
+            assertArrayEquals(hello, client.readBytes("b"));
+        }
+    }
+
+    @Test
+    void malformedJsonAndBase64FailWithoutTheValue() throws IOException {
+        List<String> bodies = List.of(
+                "{\"payload\":{\"data\":\"a$==\"}}",
+                "{\"payload\":{\"data\":\"aGk=x\"}}",
+                "{\"payload\":{\"data\":\"aGVsb\"}}",
+                "{\"payload\":{\"data\":\"\\x41\"}}",
+                "{\"payload\":{\"data\":\"\\ud800\"}}",
+                "{\"payload\":{\"data\":\"\\udc00\"}}",
+                "{\"payload\":{\"data\":\"\\ud800\\u0041\"}}",
+                "{\"payload\":{\"data\":\"\\u12\"}}",
+                "{\"payload\":{\"data\":\"\\uzzzz\"}}",
+                "{\"payload\":{\"data\":\"a\tb\"}}",
+                "{\"payload\":{\"data\":\"aGk=\",\"data\":\"aGk=\"}}",
+                "{\"payload\":{\"data\":\"aGk=\"}} x",
+                "[".repeat(40) + "]".repeat(40),
+                "{\"payload\":{\"data\":\"aGk=\",\"dataCrc32c\":\"x\"}}",
+                "{\"payload\":{\"data\":\"aGk=\"},\"n\":-}",
+                "{\"payload\":{\"data\":\"aGk=\"},\"n\":1.}",
+                "{\"payload\":{\"data\":\"aGk=\"},\"n\":tru}",
+                "{\"payload\" {}}",
+                "{\"payload\":{\"data\":\"aGk=\"},}");
+        for (int i = 0; i < bodies.size(); i++) {
+            google.on("GET", SECRETS + "/m" + i + "/versions/latest:access", new Response(200, bodies.get(i)));
+        }
+        try (SecretManagerClient client = open()) {
+            for (int i = 0; i < bodies.size(); i++) {
+                String name = "m" + i;
+                SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readBytes(name),
+                        bodies.get(i));
+                assertTrue(e.getMessage().startsWith("Cannot parse the response for secret '" + name + "'")
+                        || e.getMessage().startsWith("No payload.data"), bodies.get(i) + ": " + e.getMessage());
+            }
+        }
+    }
+
+    @Test
+    void aSlowServerTimesOutAndAnAbsentOneFails() throws IOException {
+        google.on("GET", SECRETS + "/slow/versions/latest:access", access("1").delayed(3000));
+        try (SecretManagerClient client = open(Map.of("secrets.request-timeout", "PT0.5S"))) {
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("slow"));
+            assertEquals("Timed out reading secret 'slow'", e.getMessage());
+        }
+        try (SecretManagerClient client = open(Map.of("secrets.endpoint", "http://127.0.0.1:1"))) {
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("a"));
+            assertTrue(e.getMessage().startsWith("Failed reading secret 'a': "), e.getMessage());
+        }
     }
 
     @Test
     void configurationIsChecked() throws IOException {
-        Path key = google.serviceAccountKey(dir);
+        Path key = google.credentialsFile(dir);
         Map<String, String> base = Map.of("secrets.provider", "google-secret-manager",
-                "secrets.service-account-key-path", key.toString());
+                "secrets.credentials-path", key.toString());
         assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(base), "project id is required");
         Map<String, String> badProject = new HashMap<>(base);
         badProject.put("secrets.project-id", "../other");
@@ -308,10 +465,27 @@ class GoogleSecretManagerClientTest {
         assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(badTimeout));
         badTimeout.put("secrets.request-timeout", "-PT1S");
         assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(badTimeout));
-        Map<String, String> missingKey = new HashMap<>(base);
-        missingKey.put("secrets.project-id", "p");
-        missingKey.put("secrets.service-account-key-path", dir.resolve("missing.json").toString());
-        assertThrows(SecretManagerException.class, () -> SecretManagerClient.create(missingKey));
+        Map<String, String> valid = new HashMap<>(base);
+        valid.put("secrets.project-id", "p");
+        for (Map.Entry<String, String> invalid : Map.of(
+                "secrets.credentials", "service-account",
+                "secrets.token-endpoint", "http://oauth2.googleapis.com/token",
+                "secrets.metadata-endpoint", "http://10.0.0.1",
+                "secrets.replication-locations", "europe-north1,\"x\"").entrySet()) {
+            Map<String, String> configuration = new HashMap<>(valid);
+            configuration.put(invalid.getKey(), invalid.getValue());
+            assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(configuration),
+                    invalid.toString());
+        }
+        Map<String, String> both = new HashMap<>(valid);
+        both.put("secrets.credentials", "metadata");
+        assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(both),
+                "a credentials file and the metadata server exclude each other");
+        for (String metadata : List.of("http://metadata.google.internal", "http://169.254.169.254",
+                "http://[::1]:8080")) {
+            SecretManagerClient.create(Map.of("secrets.provider", "google-secret-manager", "secrets.project-id", "p",
+                    "secrets.credentials", "metadata", "secrets.metadata-endpoint", metadata)).close();
+        }
     }
 
     @Test
