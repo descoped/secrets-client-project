@@ -42,8 +42,10 @@ echo "== jdeps: requires that are missing or unused"
 jdeps --multi-release "$release" --module-path "$out/lib" --check \
     io.descoped.secrets.api,io.descoped.secrets.provider.safe,io.descoped.secrets.provider.dynamic
 
+# Guarded memory (safe-configuration, and every provider's read) needs native access for the API module.
 echo "== module path"
-java --module-path "$out/lib:$out/classes" --module consumer/consumer.Main module
+java --enable-native-access=io.descoped.secrets.api --module-path "$out/lib:$out/classes" \
+    --module consumer/consumer.Main module
 
 echo "== class path"
-java --class-path "$out/lib/*:$out/classes/consumer" consumer.Main classpath
+java --enable-native-access=ALL-UNNAMED --class-path "$out/lib/*:$out/classes/consumer" consumer.Main classpath

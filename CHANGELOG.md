@@ -13,11 +13,21 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   pages, `mlock`, no access outside a callback, and on Linux no core dumps, nothing in a forked child, and
   `memfd_secret` memory (removed from the kernel's direct map) where the kernel offers it. Needs
   `--enable-native-access=io.descoped.secrets.api`. Configuration `secrets.memory.guard` and `secrets.memory.lock`.
-  The clients do not use it yet.
+- `SecretManagerClient.read(name)`/`read(name, version)` return a `Secret`, and `addVersion(name, Secret)` writes
+  one. Closing the client closes the secrets it returned.
+- safe-configuration reads, parses, holds and writes in guarded memory: no value is on the Java heap unless the caller
+  asks for a heap copy, proven by a canary heap-dump test. Google Secret Manager and dynamic-configuration copy into
+  guarded memory for `read` for now.
 
 ### Changed
 
 - Java 25 or later (was 17).
+- `SecretManagerClient.read(String, String)` is a new abstract method: a provider written for 3.x must implement it.
+- safe-configuration needs native access: `SecretManagerClient.create` fails without
+  `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path) unless
+  `secrets.memory.guard=off`. `read` needs it with every provider.
+- safe-configuration is for local development and tests, not for production.
+- Closing a client inside a callback of a secret it returned throws `IllegalStateException`; a later `close()` wipes.
 
 ## [3.0.0] - 2026-11-17
 

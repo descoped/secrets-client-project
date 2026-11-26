@@ -1,7 +1,9 @@
 # Provider: safe-configuration
 
-Secrets in a local file, held in memory as bytes and wiped on `close()`. Reads and writes. Use it where secrets are
-delivered as a file: a developer machine, a VM, a container with a mounted secret file.
+Secrets in a local file, read, parsed, held and written in guarded memory: no value is ever on the Java heap unless
+the caller asks for a heap copy. Reads and writes. **For local development and tests, not for production**: a file
+of secrets on disk is only as safe as the disk and its permissions. In production, use
+[Google Secret Manager](google-secret-manager.md).
 
 - Maven: `io.descoped.secrets:secrets-provider-safe-configuration`, scope `runtime`
 - Provider name: `safe-configuration`
@@ -15,6 +17,10 @@ Key | Description
 ---|---
 `secrets.provider` | `safe-configuration` (required)
 `secrets.property-resource-path` | path of the secrets file (required); it must exist
+`secrets.memory.guard`, `secrets.memory.lock` | the guarded memory, see [the API](../api.md#guarded-memory-secretmemory-and-secret)
+
+The JVM needs `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path), or
+`secrets.memory.guard=off` (tests only).
 
 ```java
 SecretManagerClient client = SecretManagerClient.create(Map.of(
@@ -69,6 +75,15 @@ the same time can lose one of the updates. Use one writer per file.
 
 ## Memory
 
-Values are held as `byte[]`, never as `String`. `readBytes` and `readChars` return copies; `addVersion` copies the
-caller's array; replaced values are wiped; `close()` wipes every value. The intermediate buffers used for parsing and
-writing are wiped too.
+The file is read with a `FileChannel` straight into guarded memory and parsed there; each value is copied into a
+`Secret` of its own, and the file's content is wiped. `addVersion` reads the file again into guarded memory, builds
+the new content there and writes it from there. Only the keys, which are not secret, are ever on the Java heap.
+
+- `read` returns a copy in guarded memory, which the caller closes; `close()` of the client closes it too.
+- `addVersion(name, Secret)` copies the value; the caller still owns the `Secret`.
+- `readBytes`, `readChars` and `readString` return heap copies, and `addVersion` with an array or a string copies it
+  into guarded memory and wipes that copy: the caller's own arrays and strings are outside the guarantee.
+- Replaced values are wiped; `close()` wipes and unmaps everything.
+
+A canary test proves it: a child JVM reads a random value through the provider, writes it, and dumps its heap, which
+must not hold the value in any encoding.

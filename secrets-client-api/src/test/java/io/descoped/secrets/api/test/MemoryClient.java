@@ -1,6 +1,8 @@
 package io.descoped.secrets.api.test;
 
+import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
+import io.descoped.secrets.api.SecretMemory;
 import io.descoped.secrets.api.SecretNotFoundException;
 
 import java.util.ArrayList;
@@ -18,6 +20,12 @@ final class MemoryClient implements SecretManagerClient {
     final Map<String, List<byte[]>> versions = new ConcurrentHashMap<>();
     final List<byte[]> returned = new ArrayList<>();
     final List<byte[]> received = new ArrayList<>();
+    private final SecretMemory memory = SecretMemory.create(Map.of(SecretMemory.GUARD_KEY, "off"));
+
+    @Override
+    public Secret read(String secretName, String secretVersion) {
+        return memory.fromBytes(readBytes(secretName, secretVersion));
+    }
 
     @Override
     public byte[] readBytes(String secretName, String secretVersion) {
@@ -45,6 +53,7 @@ final class MemoryClient implements SecretManagerClient {
 
     @Override
     public void close() {
-        // Nothing to release: the versions stay readable to the test after close.
+        // The versions stay readable to the test after close.
+        memory.close();
     }
 }

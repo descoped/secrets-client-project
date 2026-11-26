@@ -14,7 +14,7 @@ true when behaviour changes.
 | `secrets-client-project` (root) | n/a | parent and aggregator |
 | `secrets-client-bom` | n/a | BOM of the modules below |
 | `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
-| `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, values kept as bytes, no logging |
+| `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
 | `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | read-only, on `io.descoped.config:dynamic-configuration` 3.x, for tests and migration |
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API, google-auth (Application Default Credentials), Jackson 3 `jackson-core` |
 
@@ -42,7 +42,10 @@ change to the API or to a provider's documented behaviour needs a new major vers
   access to secrets (access and refresh tokens), only in guarded native memory (FFM, `java.lang.foreign`): never in a
   heap array, a `String` or a heap `ByteBuffer`, except the hand-over copy a caller asks for, wiped when its callback
   returns. No runtime dependency that holds them on the heap. A canary heap-dump test proves each read and write path.
-  Code from 3.x does not meet this yet; new code must.
+  Code from 3.x does not meet this yet; new code must. Accepted interim exceptions, until the plan removes them:
+  `read` in the Google provider (rebuilt in phase 4) and in dynamic-configuration (removed in phase 6) copies
+  `readBytes` into guarded memory, and the default `addVersion(String, Secret)` hands a wiped heap copy to
+  `addVersion(String, byte[])`.
 - **One contract for every provider.** A missing secret, a closed client and a write the provider cannot do are
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and

@@ -19,6 +19,11 @@ Key | Description
 `secrets.endpoint` | the API endpoint, default `https://secretmanager.googleapis.com`; another host serving the same global API, such as a Private Service Connect endpoint or a test server. https only; plain http only for a loopback address
 `secrets.connect-timeout` | ISO-8601 duration, default `PT10S`
 `secrets.request-timeout` | ISO-8601 duration, default `PT30S`
+`secrets.memory.guard`, `secrets.memory.lock` | the guarded memory that `read` returns secrets in, created by the first `read`; see [the API](../api.md#guarded-memory-secretmemory-and-secret)
+
+`read` needs native access (`--enable-native-access=io.descoped.secrets.api`, `ALL-UNNAMED` on the class path) or
+`secrets.memory.guard=off` (tests only). For now it reads the value as `readBytes` does and copies it into guarded
+memory, so the value is on the heap on the way; the other methods need no native access.
 
 ```java
 SecretManagerClient client = SecretManagerClient.create(Map.of(

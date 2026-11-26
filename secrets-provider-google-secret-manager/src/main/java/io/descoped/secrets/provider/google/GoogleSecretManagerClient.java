@@ -8,8 +8,10 @@ import tools.jackson.core.ObjectReadContext;
 import tools.jackson.core.ObjectWriteContext;
 import tools.jackson.core.json.JsonFactory;
 import com.google.auth.oauth2.GoogleCredentials;
+import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.SecretMemory;
 import io.descoped.secrets.api.SecretNotFoundException;
 
 import java.io.ByteArrayOutputStream;
@@ -56,10 +58,17 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
     private final URI projectUri;
     private final List<String> replicationLocations;
     private final Duration requestTimeout;
+    private final Map<String, String> memorySettings;
     private volatile Session session;
+    /**
+     * Guarded memory for {@link #read(String, String)}, created by its first call so that a client that never calls
+     * it needs no native access; under {@code this}.
+     */
+    private SecretMemory memory;
 
     GoogleSecretManagerClient(URI endpoint, String projectId, GoogleCredentials credentials,
-                              List<String> replicationLocations, Duration connectTimeout, Duration requestTimeout) {
+                              List<String> replicationLocations, Duration connectTimeout, Duration requestTimeout,
+                              Map<String, String> memorySettings) {
         String base = endpoint.toString();
         int end = base.length();
         while (end > 0 && base.charAt(end - 1) == '/') {
@@ -69,6 +78,7 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
         this.projectUri = URI.create(base + "/v1/projects/" + projectId);
         this.replicationLocations = List.copyOf(replicationLocations);
         this.requestTimeout = requestTimeout;
+        this.memorySettings = Map.copyOf(memorySettings);
         this.session = new Session(HttpClient.newBuilder().connectTimeout(connectTimeout).build(), credentials);
     }
 
@@ -99,6 +109,25 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
     }
 
     /**
+     * The value read as {@link #readBytes(String, String)} reads it, then copied into guarded memory and wiped from
+     * the heap. The response body is wiped too; the HTTP client's own buffers are not reachable. Until this provider
+     * is rebuilt on guarded memory, the value is on the heap on the way.
+     */
+    @Override
+    public Secret read(String secretName, String secretVersion) {
+        SecretMemory guarded = guardedMemory();
+        return guarded.fromBytes(readBytes(secretName, secretVersion));
+    }
+
+    private synchronized SecretMemory guardedMemory() {
+        open();
+        if (memory == null) {
+            memory = SecretMemory.create(memorySettings);
+        }
+        return memory;
+    }
+
+    /**
      * Adds a version, and creates the secret first if it does not exist, with the replication from the
      * configuration. Returns the new version number.
      */
@@ -126,11 +155,21 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
     }
 
     /**
-     * Drops the HTTP client and the credentials with their access token. Idempotent.
+     * Drops the HTTP client and the credentials with their access token, and closes the secrets
+     * {@link #read(String, String)} returned. Idempotent.
      */
     @Override
     public void close() {
         session = null;
+        SecretMemory guarded;
+        synchronized (this) {
+            guarded = memory;
+        }
+        // Outside the lock, so that a callback that calls read while this waits for it fails instead of deadlocking.
+        // Kept, so that a close() that failed inside a callback can be repeated.
+        if (guarded != null) {
+            guarded.close();
+        }
     }
 
     private Session open() {

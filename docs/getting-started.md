@@ -71,15 +71,18 @@ Map<String, String> configuration = Map.of(
         "secrets.provider", "google-secret-manager",
         "secrets.project-id", "my-project");          // Application Default Credentials
 
-try (SecretManagerClient client = SecretManagerClient.create(configuration)) {
-    char[] password = client.readChars("db-password");
-    try {
-        connect(password);
-    } finally {
-        Arrays.fill(password, '\0');
-    }
+try (SecretManagerClient client = SecretManagerClient.create(configuration);
+     Secret password = client.read("db-password")) {
+    password.withChars(chars -> {
+        connect(chars);
+        return null;
+    });
 }
 ```
+
+`read` keeps the value in guarded native memory, which needs native access: start the JVM with
+`--enable-native-access=io.descoped.secrets.api` (`--enable-native-access=ALL-UNNAMED` on the class path). The
+safe-configuration provider needs it to start at all. See [guarded memory](api.md#guarded-memory-secretmemory-and-secret).
 
 On the module path, the application module `requires io.descoped.secrets.api` only; provider modules are found
 without being required. On the class path, providers are found through `META-INF/services`.
@@ -88,7 +91,7 @@ without being required. On the class path, providers are found through `META-INF
 
 Provider | Reads | Writes | Holds values as | Use it for
 ---|---|---|---|---
-`safe-configuration` | a local `key=value` file | yes, atomically, owner-only | bytes, wiped | development, VMs, containers with a mounted secret file
+`safe-configuration` | a local `key=value` file | yes, atomically, owner-only | guarded memory | local development and tests
 `dynamic-configuration` | a properties file, a secret directory, inline values | no | strings | tests, migration from property files
 `google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | bytes, wiped | production on Google Cloud
 

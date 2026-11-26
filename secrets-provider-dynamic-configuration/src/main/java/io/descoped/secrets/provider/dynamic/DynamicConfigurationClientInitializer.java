@@ -81,7 +81,7 @@ public final class DynamicConfigurationClientInitializer implements SecretManage
         }
         builder.values(values);
         try {
-            return new DynamicConfigurationClient(builder.build());
+            return new DynamicConfigurationClient(builder.build(), configuration);
         } catch (ConfigurationException e) {
             throw new SecretManagerException("Cannot load the secrets", e);
         }

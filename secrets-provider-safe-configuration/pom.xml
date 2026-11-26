@@ -13,13 +13,20 @@
     <packaging>jar</packaging>
 
     <name>Secrets Provider Safe Configuration</name>
-    <description>SecretManagerClient provider for a local properties file, holding values as bytes that are wiped on close.</description>
+    <description>SecretManagerClient provider for a local properties file, for local development and tests, holding values in guarded memory.</description>
 
     <dependencies>
         <dependency>
             <groupId>io.descoped.secrets</groupId>
             <artifactId>secrets-client-api</artifactId>
             <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.descoped.secrets</groupId>
+            <artifactId>secrets-test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <dependency>

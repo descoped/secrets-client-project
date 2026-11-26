@@ -20,11 +20,11 @@ import java.util.Objects;
  * try (SecretManagerClient client = SecretManagerClient.create(Map.of(
  *         "secrets.provider", "safe-configuration",
  *         "secrets.property-resource-path", "/run/secrets/app.properties"))) {
- *     char[] password = client.readChars("db.password");
- *     try {
- *         connect(password);
- *     } finally {
- *         Arrays.fill(password, '\0');
+ *     try (Secret password = client.read("db.password")) {
+ *         password.withChars(chars -> {
+ *             connect(chars);
+ *             return null;
+ *         });
  *     }
  * }
  * }</pre>
@@ -34,8 +34,9 @@ import java.util.Objects;
  * <ul>
  *     <li>A secret or version that does not exist throws {@link SecretNotFoundException}.</li>
  *     <li>Any other failure throws {@link SecretManagerException}. Messages name the secret, never its value.</li>
- *     <li>{@link #readBytes(String, String)} returns a new array that the caller owns and should wipe after use. The
- *     client never keeps a reference to it, and never to an array passed to {@link #addVersion(String, byte[])}.</li>
+ *     <li>{@link #read(String, String)} returns a new {@link Secret} that the caller owns and closes; closing the
+ *     client closes it too. {@link #readBytes(String, String)} returns a new array that the caller owns and should
+ *     wipe after use. The client never keeps a reference to either, nor to a value passed to {@code addVersion}.</li>
  *     <li>A provider that cannot write throws {@link UnsupportedOperationException} from
  *     {@link #addVersion(String, byte[])}.</li>
  *     <li>After {@link #close()}, every method except {@code close()} throws {@link IllegalStateException}.
@@ -43,9 +44,11 @@ import java.util.Objects;
  *     <li>Clients are thread-safe.</li>
  * </ul>
  *
- * <p>{@link #readString(String)} is a convenience for values that are not sensitive or end up in a {@link String}
- * anyway: a {@code String} is immutable and cannot be wiped. Prefer {@link #readChars(String)} or
- * {@link #readBytes(String)} for passwords and keys.
+ * <p>{@link #read(String)} keeps the value off the Java heap: use it, and hand the value over with
+ * {@link Secret#withSegment}, {@link Secret#withBytes} or {@link Secret#withChars}, whose heap copies are wiped when
+ * the call returns. {@link #readBytes(String)} and {@link #readChars(String)} return heap copies for the caller to
+ * wipe; {@link #readString(String)} is a convenience for values that are not sensitive or end up in a {@link String}
+ * anyway: a {@code String} is immutable and cannot be wiped.
  */
 public interface SecretManagerClient extends AutoCloseable {
 
@@ -153,6 +156,61 @@ public interface SecretManagerClient extends AutoCloseable {
     }
 
     /**
+     * Reads a version of a secret into guarded memory. The secret is the caller's: close it when it is no longer
+     * needed. Closing the client closes it too.
+     *
+     * <p>A provider built on guarded memory never puts the value on the Java heap on the way: safe-configuration
+     * does. A provider not rebuilt yet (Google Secret Manager, dynamic-configuration) reads it as
+     * {@link #readBytes(String, String)} does and copies it into guarded memory, wiping its own array.
+     *
+     * @param secretName    the name of the secret
+     * @param secretVersion the version to read, or {@code null} for the latest
+     * @return the value, to close when it is no longer needed
+     * @throws SecretNotFoundException if the secret or the version does not exist
+     * @throws SecretManagerException  if the secret cannot be read, or guarded memory is not available (see
+     *                                 {@link SecretMemory})
+     * @throws IllegalStateException   if the client is closed
+     * @throws NullPointerException    if {@code secretName} is {@code null}
+     */
+    Secret read(String secretName, String secretVersion);
+
+    /**
+     * Reads the latest version of a secret into guarded memory; see {@link #read(String, String)}.
+     *
+     * @param secretName the name of the secret
+     * @return the value, to close when it is no longer needed
+     * @throws SecretNotFoundException if the secret does not exist
+     * @throws SecretManagerException  if the secret cannot be read, or guarded memory is not available
+     * @throws IllegalStateException   if the client is closed
+     * @throws NullPointerException    if {@code secretName} is {@code null}
+     */
+    default Secret read(String secretName) {
+        return read(secretName, null);
+    }
+
+    /**
+     * Adds a new version of a secret from guarded memory, creating the secret if it does not exist. The client
+     * copies the value; the caller still owns {@code secretValue} and closes it.
+     *
+     * <p>A provider built on guarded memory never puts the value on the Java heap on the way: safe-configuration
+     * does. This default, for providers not rebuilt yet, hands a heap copy to
+     * {@link #addVersion(String, byte[])} and wipes it when that returns.
+     *
+     * @param secretName  the name of the secret
+     * @param secretValue the value of the new version
+     * @return the id of the new version
+     * @throws SecretManagerException        if the version cannot be added
+     * @throws UnsupportedOperationException if the provider is read-only
+     * @throws IllegalStateException         if the client or {@code secretValue} is closed
+     * @throws NullPointerException          if an argument is {@code null}
+     */
+    default String addVersion(String secretName, Secret secretValue) {
+        Objects.requireNonNull(secretName, "secretName");
+        Objects.requireNonNull(secretValue, "secretValue");
+        return secretValue.withBytes(bytes -> addVersion(secretName, bytes));
+    }
+
+    /**
      * Adds a new version of a secret, creating the secret if it does not exist. The client copies
      * {@code secretValue}; the caller still owns it and may wipe it afterwards.
      *
@@ -220,7 +278,11 @@ public interface SecretManagerClient extends AutoCloseable {
     }
 
     /**
-     * Closes the client and wipes what it holds in memory. Idempotent.
+     * Closes the client and wipes what it holds in memory, including the secrets {@link #read(String, String)}
+     * returned, after the callbacks running on them in other threads. Idempotent.
+     *
+     * @throws IllegalStateException if called inside a callback of a secret the client returned: the client is closed
+     *                               then, and a later {@code close()} wipes the memory
      */
     @Override
     void close();

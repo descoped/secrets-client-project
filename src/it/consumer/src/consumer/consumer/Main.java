@@ -1,5 +1,6 @@
 package consumer;
 
+import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
 
@@ -31,6 +32,9 @@ public final class Main {
                 client.addVersion("question", "life");
                 check("safe-configuration", "42", client.readString("answer"));
                 check("safe-configuration write", "life", client.readString("question"));
+                try (Secret answer = client.read("answer")) {
+                    check("safe-configuration guarded read", "42", answer.withChars(String::new));
+                }
             }
         } finally {
             Files.deleteIfExists(file);
