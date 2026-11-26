@@ -22,6 +22,12 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 ### Changed
 
 - Java 25 or later (was 17).
+- `SecretManagerClient.read(String, String)` is a new abstract method: a provider written for 3.x must implement it.
+- safe-configuration needs native access: `SecretManagerClient.create` fails without
+  `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path) unless
+  `secrets.memory.guard=off`. `read` needs it with every provider.
+- safe-configuration is for local development and tests, not for production.
+- Closing a client inside a callback of a secret it returned throws `IllegalStateException`; a later `close()` wipes.
 
 ## [3.0.0] - 2026-11-17
 

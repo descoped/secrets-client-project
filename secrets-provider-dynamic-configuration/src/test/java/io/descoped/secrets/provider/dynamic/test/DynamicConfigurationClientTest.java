@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -21,8 +22,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -159,6 +162,57 @@ class DynamicConfigurationClientTest {
         }
         assertEquals("Secret (closed)", secret.toString());
     }
+
+    @Test
+    void aCallbackThatCallsTheClientWhileItClosesFailsInsteadOfDeadlocking() throws Exception {
+        SecretManagerClient client = open(Map.of("secrets.values.a", "1"));
+        Secret secret = client.read("a");
+        CountDownLatch inCallback = new CountDownLatch(1);
+        CountDownLatch closing = new CountDownLatch(1);
+        AtomicReference<Thread> closer = new AtomicReference<>();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> reader = executor.submit(() -> secret.withSegment(segment -> {
+                inCallback.countDown();
+                awaitQuietly(closing);
+                // The closer waits for this callback; calling the client now must not wait for the closer.
+                while (closer.get().getState() != Thread.State.WAITING) {
+                    Thread.onSpinWait();
+                }
+                return assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
+            }));
+            assertTrue(inCallback.await(10, TimeUnit.SECONDS));
+            closer.set(Thread.ofPlatform().start(client::close));
+            closing.countDown();
+            assertInstanceOf(IllegalStateException.class, reader.get(10, TimeUnit.SECONDS));
+            closer.get().join(Duration.ofSeconds(10));
+            assertFalse(closer.get().isAlive());
+        } finally {
+            executor.shutdownNow();
+        }
+        assertEquals("Secret (closed)", secret.toString());
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            assertTrue(latch.await(10, TimeUnit.SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(e);
+        }
+    }
+
+    @Test
+    void closeInsideACallbackFailsAndALaterCloseWipes() throws Exception {
+        SecretManagerClient client = open(Map.of("secrets.values.a", "1"));
+        Secret secret = client.read("a");
+        secret.withSegment(segment -> assertThrows(IllegalStateException.class, client::close));
+        assertEquals("Secret", secret.toString(), "nothing is wiped inside the callback");
+        client.close();
+        assertEquals("Secret (closed)", secret.toString());
+        assertThrows(IllegalStateException.class, () -> client.read("a"));
+    }
+
 
     @Test
     void isReadOnly() {

@@ -14,7 +14,10 @@ try (SecretManagerClient client = SecretManagerClient.create(Map.of(
         "secrets.provider", "safe-configuration",
         "secrets.property-resource-path", "/run/secrets/app.properties"));
      Secret password = client.read("db.password")) {
-    password.withChars(chars -> connect(chars));
+    password.withChars(chars -> {
+        connect(chars);
+        return null;
+    });
 }
 ```
 

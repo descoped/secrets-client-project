@@ -84,11 +84,14 @@ final class DynamicConfigurationClient implements SecretManagerClient {
     @Override
     public void close() {
         configuration = null;
+        SecretMemory current;
         synchronized (this) {
-            if (memory != null) {
-                memory.close();
-                memory = null;
-            }
+            current = memory;
+        }
+        // Outside the lock, so that a callback that calls read while this waits for it fails instead of deadlocking.
+        // Kept, so that a close() that failed inside a callback can be repeated.
+        if (current != null) {
+            current.close();
         }
     }
 

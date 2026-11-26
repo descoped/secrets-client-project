@@ -36,6 +36,9 @@ final class SafeConfigurationClient implements SecretManagerClient {
      */
     static final String LATEST = "latest";
 
+    private static final String SECRET_NAME = "secretName";
+    private static final String SECRET_VALUE = "secretValue";
+
     private final Path path;
     private final SecretMemory memory;
     private final Map<String, Secret> secrets = new HashMap<>();
@@ -85,7 +88,7 @@ final class SafeConfigurationClient implements SecretManagerClient {
     }
 
     private <R> R withStored(String secretName, String secretVersion, Function<Secret, R> action) {
-        Objects.requireNonNull(secretName, "secretName");
+        Objects.requireNonNull(secretName, SECRET_NAME);
         lock.readLock().lock();
         try {
             checkOpen();
@@ -105,8 +108,8 @@ final class SafeConfigurationClient implements SecretManagerClient {
      */
     @Override
     public String addVersion(String secretName, byte[] secretValue) {
-        Objects.requireNonNull(secretName, "secretName");
-        Objects.requireNonNull(secretValue, "secretValue");
+        Objects.requireNonNull(secretName, SECRET_NAME);
+        Objects.requireNonNull(secretValue, SECRET_VALUE);
         checkOpen();
         try (Secret value = memory.fromBytes(secretValue.clone())) {
             return addVersion(secretName, value);
@@ -125,8 +128,8 @@ final class SafeConfigurationClient implements SecretManagerClient {
      */
     @Override
     public String addVersion(String secretName, Secret secretValue) {
-        Objects.requireNonNull(secretName, "secretName");
-        Objects.requireNonNull(secretValue, "secretValue");
+        Objects.requireNonNull(secretName, SECRET_NAME);
+        Objects.requireNonNull(secretValue, SECRET_VALUE);
         lock.writeLock().lock();
         try {
             checkOpen();
@@ -184,20 +187,23 @@ final class SafeConfigurationClient implements SecretManagerClient {
 
     /**
      * Closes the client, every secret it holds and every secret {@link #read(String, String)} returned, and wipes
-     * and unmaps their memory. Idempotent.
+     * and unmaps their memory, after the callbacks running on those secrets in other threads. Idempotent.
+     *
+     * <p>The memory is closed outside the client's lock: a callback that calls the client while this waits for it
+     * gets {@link IllegalStateException} instead of a deadlock. Inside a callback of one of the secrets, the memory
+     * cannot be closed and this throws {@link IllegalStateException}; the client is closed then, and a later
+     * {@code close()} wipes the memory.
      */
     @Override
     public void close() {
         lock.writeLock().lock();
         try {
-            if (!closed) {
-                closed = true;
-                secrets.clear();
-                memory.close();
-            }
+            closed = true;
+            secrets.clear();
         } finally {
             lock.writeLock().unlock();
         }
+        memory.close();
     }
 
     private void checkOpen() {

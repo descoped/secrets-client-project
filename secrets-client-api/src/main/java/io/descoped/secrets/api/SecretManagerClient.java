@@ -21,7 +21,10 @@ import java.util.Objects;
  *         "secrets.provider", "safe-configuration",
  *         "secrets.property-resource-path", "/run/secrets/app.properties"))) {
  *     try (Secret password = client.read("db.password")) {
- *         password.withChars(chars -> connect(chars));
+ *         password.withChars(chars -> {
+ *             connect(chars);
+ *             return null;
+ *         });
  *     }
  * }
  * }</pre>
@@ -275,7 +278,11 @@ public interface SecretManagerClient extends AutoCloseable {
     }
 
     /**
-     * Closes the client and wipes what it holds in memory. Idempotent.
+     * Closes the client and wipes what it holds in memory, including the secrets {@link #read(String, String)}
+     * returned, after the callbacks running on them in other threads. Idempotent.
+     *
+     * @throws IllegalStateException if called inside a callback of a secret the client returned: the client is closed
+     *                               then, and a later {@code close()} wipes the memory
      */
     @Override
     void close();

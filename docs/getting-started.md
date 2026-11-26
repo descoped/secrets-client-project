@@ -71,15 +71,18 @@ Map<String, String> configuration = Map.of(
         "secrets.provider", "google-secret-manager",
         "secrets.project-id", "my-project");          // Application Default Credentials
 
-try (SecretManagerClient client = SecretManagerClient.create(configuration)) {
-    char[] password = client.readChars("db-password");
-    try {
-        connect(password);
-    } finally {
-        Arrays.fill(password, '\0');
-    }
+try (SecretManagerClient client = SecretManagerClient.create(configuration);
+     Secret password = client.read("db-password")) {
+    password.withChars(chars -> {
+        connect(chars);
+        return null;
+    });
 }
 ```
+
+`read` keeps the value in guarded native memory, which needs native access: start the JVM with
+`--enable-native-access=io.descoped.secrets.api` (`--enable-native-access=ALL-UNNAMED` on the class path). The
+safe-configuration provider needs it to start at all. See [guarded memory](api.md#guarded-memory-secretmemory-and-secret).
 
 On the module path, the application module `requires io.descoped.secrets.api` only; provider modules are found
 without being required. On the class path, providers are found through `META-INF/services`.

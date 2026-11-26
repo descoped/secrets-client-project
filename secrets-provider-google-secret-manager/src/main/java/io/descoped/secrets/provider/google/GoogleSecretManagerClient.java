@@ -164,8 +164,9 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
         SecretMemory guarded;
         synchronized (this) {
             guarded = memory;
-            memory = null;
         }
+        // Outside the lock, so that a callback that calls read while this waits for it fails instead of deadlocking.
+        // Kept, so that a close() that failed inside a callback can be repeated.
         if (guarded != null) {
             guarded.close();
         }
