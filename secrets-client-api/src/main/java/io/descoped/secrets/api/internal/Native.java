@@ -360,9 +360,13 @@ public final class Native {
         invoke(name, state -> (int) madvise.invokeExact(state, MemorySegment.ofAddress(address), length, advice));
     }
 
-    /** One downcall with {@code errno} captured in {@code state}. Returns the C result, widened to a long. */
+    /**
+     * One downcall with {@code errno} captured in {@code state}. Returns the C result, widened to a long. Declares
+     * {@code Throwable} because {@code MethodHandle.invokeExact} does.
+     */
     @FunctionalInterface
     private interface Downcall {
+        @SuppressWarnings("java:S112")
         long invoke(MemorySegment state) throws Throwable;
     }
 
