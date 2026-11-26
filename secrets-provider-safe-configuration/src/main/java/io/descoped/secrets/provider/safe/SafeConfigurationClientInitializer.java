@@ -9,13 +9,25 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The provider {@code safe-configuration}: secrets in a local file, held in memory as bytes and wiped on close.
+ * The provider {@code safe-configuration}: secrets in a local file, for local development and tests. It is not meant
+ * for production: a file of secrets on disk is only as safe as the disk and its permissions. Use the Google Secret
+ * Manager provider there.
+ *
+ * <p>The file is read, parsed and rewritten in guarded memory ({@link io.descoped.secrets.api.SecretMemory}), and
+ * every value is held there: no value is on the Java heap unless the caller asks for a heap copy
+ * ({@code readBytes}, {@code readChars}, {@code readString}, or the hand-over callbacks of
+ * {@link io.descoped.secrets.api.Secret}). This needs native access
+ * ({@code --enable-native-access=io.descoped.secrets.api}); without it, creating the client fails unless
+ * {@value io.descoped.secrets.api.SecretMemory#GUARD_KEY} is {@code off}.
  *
  * <table>
  *     <caption>Configuration</caption>
  *     <tr><th>Key</th><th>Value</th></tr>
  *     <tr><td>{@code secrets.provider}</td><td>{@code safe-configuration}</td></tr>
  *     <tr><td>{@value #PATH_KEY}</td><td>path of the secrets file (required)</td></tr>
+ *     <tr><td>{@value io.descoped.secrets.api.SecretMemory#GUARD_KEY},
+ *     {@value io.descoped.secrets.api.SecretMemory#LOCK_KEY}</td><td>the guarded memory, see
+ *     {@link io.descoped.secrets.api.SecretMemory}</td></tr>
  * </table>
  *
  * <h2>File format</h2>
@@ -59,6 +71,6 @@ public final class SafeConfigurationClientInitializer implements SecretManagerCl
 
     @Override
     public SecretManagerClient initialize(Map<String, String> configuration) {
-        return new SafeConfigurationClient(Path.of(configuration.get(PATH_KEY)));
+        return new SafeConfigurationClient(Path.of(configuration.get(PATH_KEY)), configuration);
     }
 }

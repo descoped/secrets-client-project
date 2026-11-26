@@ -88,7 +88,7 @@ without being required. On the class path, providers are found through `META-INF
 
 Provider | Reads | Writes | Holds values as | Use it for
 ---|---|---|---|---
-`safe-configuration` | a local `key=value` file | yes, atomically, owner-only | bytes, wiped | development, VMs, containers with a mounted secret file
+`safe-configuration` | a local `key=value` file | yes, atomically, owner-only | guarded memory | local development and tests
 `dynamic-configuration` | a properties file, a secret directory, inline values | no | strings | tests, migration from property files
 `google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | bytes, wiped | production on Google Cloud
 

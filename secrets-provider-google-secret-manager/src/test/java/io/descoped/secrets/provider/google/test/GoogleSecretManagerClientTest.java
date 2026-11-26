@@ -1,5 +1,6 @@
 package io.descoped.secrets.provider.google.test;
 
+import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.api.SecretNotFoundException;
@@ -86,6 +87,17 @@ class GoogleSecretManagerClientTest {
         }
         assertTrue(google.requests.stream().allMatch(r -> "Bearer token-1".equals(r.authorization())),
                 "every request carries the service account's token");
+    }
+
+    @Test
+    void readCopiesTheValueIntoGuardedMemoryAndCloseClosesIt() throws IOException {
+        google.on("GET", SECRETS + "/db-password/versions/latest:access", access("blåbær"));
+        Secret secret;
+        try (SecretManagerClient client = open()) {
+            secret = client.read("db-password");
+            assertEquals("blåbær", secret.withChars(String::new));
+        }
+        assertEquals("Secret (closed)", secret.toString());
     }
 
     @Test
@@ -250,6 +262,7 @@ class GoogleSecretManagerClientTest {
         client.close();
         client.close();
         assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
+        assertThrows(IllegalStateException.class, () -> client.read("a"));
         assertThrows(IllegalStateException.class, () -> client.addVersion("a", "v"));
         assertTrue(google.requests.isEmpty());
     }

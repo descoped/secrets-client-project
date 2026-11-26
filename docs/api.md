@@ -12,13 +12,9 @@ service that providers implement. It has no provider of its own; add one or more
 ```java
 try (SecretManagerClient client = SecretManagerClient.create(Map.of(
         "secrets.provider", "safe-configuration",
-        "secrets.property-resource-path", "/run/secrets/app.properties"))) {
-    char[] password = client.readChars("db.password");
-    try {
-        connect(password);
-    } finally {
-        Arrays.fill(password, '\0');
-    }
+        "secrets.property-resource-path", "/run/secrets/app.properties"));
+     Secret password = client.read("db.password")) {
+    password.withChars(chars -> connect(chars));
 }
 ```
 
@@ -64,6 +60,10 @@ Exception | When
 ```java
 public interface SecretManagerClient extends AutoCloseable {
 
+    Secret read(String secretName, String secretVersion);       // into guarded memory; null version = latest
+    Secret read(String secretName);
+    String addVersion(String secretName, Secret secretValue);   // from guarded memory
+
     byte[] readBytes(String secretName, String secretVersion);  // null version = latest
     byte[] readBytes(String secretName);                        // latest
     char[] readChars(String secretName, String secretVersion);  // UTF-8
@@ -97,6 +97,8 @@ Any method after `close()`, except `close()` | `IllegalStateException`
 A `null` name or value | `NullPointerException`
 
 - Exception messages name the secret, never its value, and neither do `toString()` or the cause chain.
+- `read` returns a new `Secret` that the caller owns and closes; closing the client closes it too. The client keeps
+  no reference to it, nor to a `Secret` passed to `addVersion`, which stays the caller's to close.
 - `readBytes` and `readChars` return a new array that the caller owns. The client keeps no reference to it, nor to an
   array passed to `addVersion`, so the caller can and should wipe both when done: `Arrays.fill(bytes, (byte) 0)`,
   `Arrays.fill(chars, '\0')`.
@@ -109,8 +111,12 @@ A `null` name or value | `NullPointerException`
 
 A Java `String` is immutable: it stays in the heap until the garbage collector reclaims it, and it cannot be wiped. So:
 
-- For passwords and keys, use `readChars` or `readBytes`, and wipe the array in a `finally` block as soon as it has
-  been used.
+- For passwords and keys, use `read`: the value stays in guarded memory (see below) until it is handed over with
+  `withSegment`, or with `withBytes`/`withChars`, whose heap copy is wiped when the callback returns. A provider built
+  on guarded memory (safe-configuration) never puts the value on the Java heap on the way, and neither does its
+  `addVersion(String, Secret)`; the Google Secret Manager and dynamic-configuration providers are not rebuilt yet,
+  and copy the value through the heap.
+- Otherwise use `readChars` or `readBytes`, and wipe the array in a `finally` block as soon as it has been used.
 - `readChars` decodes UTF-8 into a fresh array; the intermediate bytes and buffers are wiped on every path, including
   errors. Invalid UTF-8 is an error, never replaced with `?`.
 - `addVersion(String, char[])` encodes strictly to UTF-8 (an unpaired surrogate is an error) and wipes its
@@ -120,8 +126,8 @@ A Java `String` is immutable: it stays in the heap until the garbage collector r
 
 ## Guarded memory: `SecretMemory` and `Secret`
 
-New in 4.0 and still being built: the clients do not use it yet. When they do, `SecretManagerClient` will return
-`Secret`s, and the array and string methods above will go.
+New in 4.0 and still being built: `read` returns `Secret`s, and safe-configuration holds every value in guarded
+memory. When every provider does, the array and string methods above will go.
 
 `SecretMemory` holds secret values off the Java heap, in memory the garbage collector never sees, moves or copies, and
 that is not in heap dumps. A `Secret` is one value in it.

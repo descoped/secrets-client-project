@@ -1,7 +1,9 @@
 package io.descoped.secrets.api.test;
 
+import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.SecretMemory;
 import io.descoped.secrets.api.SecretNotFoundException;
 import io.descoped.service.provider.api.ProviderException;
 import org.junit.jupiter.api.Test;
@@ -73,6 +75,24 @@ class SecretManagerClientTest {
         Map<String, String> configuration = new HashMap<>(MEMORY);
         configuration.put("other", null);
         assertThrows(NullPointerException.class, () -> SecretManagerClient.create(configuration));
+    }
+
+    @Test
+    void readOfTheLatestVersionAndAddVersionOfASecretRoundTrip() {
+        try (MemoryClient client = memory();
+             SecretMemory own = SecretMemory.create(Map.of(SecretMemory.GUARD_KEY, "off"));
+             Secret value = own.fromBytes("blåbær".getBytes(StandardCharsets.UTF_8))) {
+            assertEquals("1", client.addVersion("a", value));
+            byte[] handedOver = client.received.getLast();
+            assertTrue(wiped(handedOver), "the heap copy is wiped when addVersion returns");
+            try (Secret read = client.read("a")) {
+                assertTrue(read.contentEquals(value));
+            }
+            assertTrue(wiped(client.returned.getLast()), "read wipes the array it copied");
+            assertThrows(NullPointerException.class, () -> client.addVersion(null, value));
+            assertThrows(NullPointerException.class, () -> client.addVersion("a", (Secret) null));
+            assertThrows(SecretNotFoundException.class, () -> client.read("missing"));
+        }
     }
 
     @Test

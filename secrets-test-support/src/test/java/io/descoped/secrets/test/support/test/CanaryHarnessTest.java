@@ -87,6 +87,13 @@ class CanaryHarnessTest {
     }
 
     @Test
+    void theCanaryCanBeWrappedInAFileFormat() throws Exception {
+        HeapCanary canary = HeapCanary.create(dir, "# å\nkey=", "\n");
+        String content = Files.readString(canary.file(), StandardCharsets.UTF_8);
+        assertTrue(content.matches("# å\nkey=[A-Za-z0-9]{" + HeapCanary.LENGTH + "}\n"), content);
+    }
+
+    @Test
     void theScanFindsFragmentsAnywhereInAFile() throws Exception {
         byte[] canary = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv".getBytes(StandardCharsets.US_ASCII);
         Path file = dir.resolve("data");

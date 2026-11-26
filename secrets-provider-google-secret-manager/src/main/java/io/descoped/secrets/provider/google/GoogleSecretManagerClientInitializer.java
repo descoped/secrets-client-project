@@ -117,7 +117,7 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         Duration requestTimeout = duration(configuration, REQUEST_TIMEOUT_KEY, Duration.ofSeconds(30));
         GoogleCredentials credentials = credentials(configuration.get(KEY_PATH_KEY)).createScoped(List.of(SCOPE));
         return new GoogleSecretManagerClient(endpoint, projectId, credentials, locations, connectTimeout,
-                requestTimeout);
+                requestTimeout, configuration);
     }
 
     /**

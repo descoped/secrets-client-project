@@ -13,7 +13,11 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   pages, `mlock`, no access outside a callback, and on Linux no core dumps, nothing in a forked child, and
   `memfd_secret` memory (removed from the kernel's direct map) where the kernel offers it. Needs
   `--enable-native-access=io.descoped.secrets.api`. Configuration `secrets.memory.guard` and `secrets.memory.lock`.
-  The clients do not use it yet.
+- `SecretManagerClient.read(name)`/`read(name, version)` return a `Secret`, and `addVersion(name, Secret)` writes
+  one. Closing the client closes the secrets it returned.
+- safe-configuration reads, parses, holds and writes in guarded memory: no value is on the Java heap unless the caller
+  asks for a heap copy, proven by a canary heap-dump test. Google Secret Manager and dynamic-configuration copy into
+  guarded memory for `read` for now.
 
 ### Changed
 

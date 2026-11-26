@@ -30,8 +30,8 @@ import java.util.zip.CRC32C;
  * the canary on its heap.
  *
  * <pre>{@code
- * HeapCanary.create(dir)
- *         .run("io.descoped.secrets.provider.safe.test/io.descoped.secrets.provider.safe.test.ReadSubject")
+ * HeapCanary.create(dir, "canary=", "\n")
+ *         .run("io.descoped.secrets.provider.safe.test/io.descoped.secrets.provider.safe.test.CanaryReader", "read")
  *         .assertClean();
  * }</pre>
  */
@@ -64,11 +64,31 @@ public final class HeapCanary {
      * @throws IOException if the file cannot be written
      */
     public static HeapCanary create(Path dir) throws IOException {
+        return create(dir, "", "");
+    }
+
+    /**
+     * Generates a canary and writes it to {@code canary.secret} in {@code dir}, between {@code before} and
+     * {@code after} (as UTF-8): for a subject that reads a file format, such as {@code "key="} and {@code "\n"}.
+     *
+     * @param dir    a directory of its own, for the canary, the heap dump and the child's error file
+     * @param before what the file holds before the canary
+     * @param after  what the file holds after the canary
+     * @return the canary
+     * @throws IOException if the file cannot be written
+     */
+    public static HeapCanary create(Path dir, String before, String after) throws IOException {
         byte[] canary = new byte[LENGTH];
         for (int i = 0; i < LENGTH; i++) {
             canary[i] = (byte) ALPHABET.charAt(RANDOM.nextInt(ALPHABET.length()));
         }
-        Path file = Files.write(dir.resolve("canary.secret"), canary);
+        byte[] prefix = before.getBytes(StandardCharsets.UTF_8);
+        byte[] suffix = after.getBytes(StandardCharsets.UTF_8);
+        byte[] content = new byte[prefix.length + LENGTH + suffix.length];
+        System.arraycopy(prefix, 0, content, 0, prefix.length);
+        System.arraycopy(canary, 0, content, prefix.length, LENGTH);
+        System.arraycopy(suffix, 0, content, prefix.length + LENGTH, suffix.length);
+        Path file = Files.write(dir.resolve("canary.secret"), content);
         return new HeapCanary(dir, canary, file, TIMEOUT);
     }
 

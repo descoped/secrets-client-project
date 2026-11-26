@@ -1,7 +1,9 @@
 package io.descoped.secrets.provider.safe.test;
 
+import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.SecretMemory;
 import io.descoped.secrets.api.SecretNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -129,6 +131,64 @@ class SafeConfigurationClientTest {
     }
 
     @Test
+    void readReturnsACopyInGuardedMemoryThatTheCallerAndCloseOfTheClientClose() throws IOException {
+        Secret kept;
+        try (SecretManagerClient client = open(file("a=blåbær\n"))) {
+            kept = client.read("a");
+            try (Secret other = client.read("a", "latest")) {
+                assertTrue(other.contentEquals(kept));
+            }
+            assertEquals("blåbær", kept.withChars(String::new), "closing one copy leaves the others");
+            assertEquals("blåbær", client.readString("a"), "and the client's own value");
+            assertThrows(SecretNotFoundException.class, () -> client.read("a", "1"));
+            assertThrows(SecretNotFoundException.class, () -> client.read("missing"));
+        }
+        assertEquals("Secret (closed)", kept.toString());
+    }
+
+    @Test
+    void addVersionOfASecretWritesItAndLeavesTheSecretToTheCaller() throws IOException {
+        Path file = file("a=1\n");
+        try (SecretManagerClient client = open(file);
+             SecretMemory memory = SecretMemory.create(Map.of());
+             Secret value = memory.fromBytes("blåbær".getBytes(StandardCharsets.UTF_8));
+             Secret broken = memory.fromBytes("line1\nhunter2".getBytes(StandardCharsets.UTF_8))) {
+            assertEquals("latest", client.addVersion("b", value));
+            assertEquals("blåbær", value.withChars(String::new));
+            assertEquals("blåbær", client.readString("b"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.addVersion("c", broken));
+            assertFalse(e.getMessage().contains("hunter2"));
+        }
+        assertEquals("a=1\nb=blåbær\n", read(file));
+    }
+
+    @Test
+    void anEmptyFileHasNoSecrets() throws IOException {
+        Path file = file("");
+        try (SecretManagerClient client = open(file)) {
+            assertThrows(SecretNotFoundException.class, () -> client.read("a"));
+            client.addVersion("a", "1");
+        }
+        assertEquals("a=1\n", read(file));
+    }
+
+    @Test
+    void theGuardedMemoryIsConfiguredWithTheClient() throws IOException {
+        Path file = file("a=1\n");
+        try (SecretManagerClient client = SecretManagerClient.create(Map.of(
+                "secrets.provider", "safe-configuration",
+                "secrets.property-resource-path", file.toString(),
+                SecretMemory.GUARD_KEY, "off"))) {
+            assertEquals("1", client.readString("a"));
+        }
+        Map<String, String> invalid = Map.of(
+                "secrets.provider", "safe-configuration",
+                "secrets.property-resource-path", file.toString(),
+                SecretMemory.LOCK_KEY, "sometimes");
+        assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(invalid));
+    }
+
+    @Test
     void addVersionRewritesOnlyItsLineAndKeepsEverythingElse() throws IOException {
         Path file = file("# header\r\nurl=https://x:8080\r\n\r\nquestion=41\r\nkv=key=value\r\n");
         try (SecretManagerClient client = open(file)) {
@@ -229,7 +289,11 @@ class SafeConfigurationClientTest {
         client.close();
         client.close();
         assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
+        assertThrows(IllegalStateException.class, () -> client.read("a"));
         assertThrows(IllegalStateException.class, () -> client.addVersion("a", "2"));
+        try (SecretMemory memory = SecretMemory.create(Map.of()); Secret value = memory.fromBytes(new byte[]{'2'})) {
+            assertThrows(IllegalStateException.class, () -> client.addVersion("a", value));
+        }
         assertThrows(IllegalStateException.class, () -> client.addVersion("#invalid", "2"),
                 "a closed client fails before it checks the name");
     }

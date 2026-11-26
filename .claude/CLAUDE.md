@@ -14,7 +14,7 @@ true when behaviour changes.
 | `secrets-client-project` (root) | n/a | parent and aggregator |
 | `secrets-client-bom` | n/a | BOM of the modules below |
 | `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
-| `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, values kept as bytes, no logging |
+| `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
 | `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | read-only, on `io.descoped.config:dynamic-configuration` 3.x, for tests and migration |
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API, google-auth (Application Default Credentials), Jackson 3 `jackson-core` |
 

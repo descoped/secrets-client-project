@@ -1,5 +1,6 @@
 package io.descoped.secrets.provider.dynamic.test;
 
+import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.api.SecretNotFoundException;
@@ -146,6 +147,20 @@ class DynamicConfigurationClientTest {
     }
 
     @Test
+    void readCopiesTheValueIntoGuardedMemoryAndCloseClosesIt() {
+        Secret secret;
+        try (SecretManagerClient client = open(Map.of("secrets.values.a", "blåbær"))) {
+            secret = client.read("a");
+            assertEquals("blåbær", secret.withChars(String::new));
+            try (Secret again = client.read("a", "latest")) {
+                assertTrue(again.contentEquals(secret));
+            }
+            assertThrows(SecretNotFoundException.class, () -> client.read("missing"));
+        }
+        assertEquals("Secret (closed)", secret.toString());
+    }
+
+    @Test
     void isReadOnly() {
         try (SecretManagerClient client = open(Map.of("secrets.values.a", "1"))) {
             assertThrows(UnsupportedOperationException.class, () -> client.addVersion("a", "2"));
@@ -159,6 +174,7 @@ class DynamicConfigurationClientTest {
         client.close();
         client.close();
         assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
+        assertThrows(IllegalStateException.class, () -> client.read("a"));
         assertThrows(IllegalStateException.class, () -> client.addVersion("a", "2"));
     }
 

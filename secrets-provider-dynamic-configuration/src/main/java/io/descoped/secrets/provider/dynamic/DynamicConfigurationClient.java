@@ -1,10 +1,13 @@
 package io.descoped.secrets.provider.dynamic;
 
 import io.descoped.config.DynamicConfiguration;
+import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
+import io.descoped.secrets.api.SecretMemory;
 import io.descoped.secrets.api.SecretNotFoundException;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -18,10 +21,35 @@ final class DynamicConfigurationClient implements SecretManagerClient {
      */
     static final String LATEST = "latest";
 
+    private final Map<String, String> settings;
     private volatile DynamicConfiguration configuration;
+    /**
+     * Guarded memory for {@link #read(String, String)}, created by its first call so that a client that never calls
+     * it needs no native access; under {@code this}.
+     */
+    private SecretMemory memory;
 
-    DynamicConfigurationClient(DynamicConfiguration configuration) {
+    DynamicConfigurationClient(DynamicConfiguration configuration, Map<String, String> settings) {
         this.configuration = Objects.requireNonNull(configuration, "configuration");
+        this.settings = Map.copyOf(settings);
+    }
+
+    /**
+     * The value copied into guarded memory. It is on the heap before that, as a {@code String} in the configuration
+     * that cannot be wiped.
+     */
+    @Override
+    public Secret read(String secretName, String secretVersion) {
+        SecretMemory current = memory();
+        return current.fromBytes(readBytes(secretName, secretVersion));
+    }
+
+    private synchronized SecretMemory memory() {
+        open();
+        if (memory == null) {
+            memory = SecretMemory.create(settings);
+        }
+        return memory;
     }
 
     @Override
@@ -50,11 +78,18 @@ final class DynamicConfigurationClient implements SecretManagerClient {
     }
 
     /**
-     * Drops the configuration. Its strings cannot be wiped; they are left to the garbage collector.
+     * Drops the configuration, and closes the secrets {@link #read(String, String)} returned. The configuration's
+     * strings cannot be wiped; they are left to the garbage collector.
      */
     @Override
     public void close() {
         configuration = null;
+        synchronized (this) {
+            if (memory != null) {
+                memory.close();
+                memory = null;
+            }
+        }
     }
 
     private DynamicConfiguration open() {
