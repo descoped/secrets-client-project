@@ -2,7 +2,7 @@
 
 - [Getting started](getting-started.md): dependencies, the modules, a first client, choosing a provider
 - [The API](api.md): `SecretManagerClient`, configuration, the contract every provider follows, keeping secrets out
-  of memory, JPMS
+  of memory, guarded memory (`SecretMemory`, `Secret`, new in 4.0), JPMS
 - Providers:
   - [safe-configuration](providers/safe-configuration.md): secrets in a local file, read and write
   - [dynamic-configuration](providers/dynamic-configuration.md): read-only, for tests and migration

@@ -64,6 +64,9 @@ change to the API or to a provider's documented behaviour needs a new major vers
 ## Testing
 
 - JUnit 6. Tests must not touch fixed paths such as `/tmp/...`; use `@TempDir`.
+- Guarded memory (`SecretMemory`, native code in the unexported package `io.descoped.secrets.api.internal`): surefire
+  runs with `--enable-native-access=io.descoped.secrets.api` (root POM). What can fault, such as reading a guard page
+  or a page outside a callback, is tested in a child JVM (`GuardPageTest` runs `GuardProbe`), never in the test JVM.
 - The Google Secret Manager tests run against `FakeGoogle`, a local server that also issues OAuth tokens for a
   generated service-account key. `GoogleSecretManagerLiveTest` calls Google only when `SECRETS_GOOGLE_TEST_PROJECT`
   is set; it is not run in CI.

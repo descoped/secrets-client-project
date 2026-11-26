@@ -118,6 +118,51 @@ A Java `String` is immutable: it stays in the heap until the garbage collector r
 - `readString` and `addVersion(String, String)` are conveniences for values that are not sensitive or that end up in a
   `String` anyway, for example a value passed to a library that only accepts strings.
 
+## Guarded memory: `SecretMemory` and `Secret`
+
+New in 4.0 and still being built: the clients do not use it yet. When they do, `SecretManagerClient` will return
+`Secret`s, and the array and string methods above will go.
+
+`SecretMemory` holds secret values off the Java heap, in memory the garbage collector never sees, moves or copies, and
+that is not in heap dumps. A `Secret` is one value in it.
+
+```java
+try (SecretMemory memory = SecretMemory.create(configuration);
+     Secret password = memory.fromChars(chars)) {          // copies into guarded memory, wipes chars
+    password.withChars(value -> {                          // a heap copy, wiped when the call returns
+        dataSource.setPassword(value);
+        return null;
+    });
+}                                                          // wiped, unlocked, unmapped
+```
+
+- **Pages of their own.** Secrets share slabs of whole pages with a guard page before and after each slab. The guard
+  pages are never accessible, so reading or writing past either end faults instead of reaching other memory.
+- **Accessible only while used.** A slab's pages are `PROT_NONE` unless a secret on them is being read, written or
+  wiped.
+- **Never swapped.** The pages are locked with `mlock`. With `secrets.memory.lock=required` (the default) memory that
+  cannot be locked is an error: raise the locked-memory limit (`ulimit -l`, `docker run --ulimit memlock=...`), or
+  set `secrets.memory.lock=preferred` to use it unlocked, which is logged once.
+- **Not in core dumps, not in a forked child** (Linux): `MADV_DONTDUMP` and `MADV_WIPEONFORK`.
+- **Wiped** when a secret is closed, and wiped and unmapped when the memory is closed. A secret that becomes
+  unreachable without being closed is wiped when the garbage collector finds it, and that is logged.
+
+The value is reached only inside a callback:
+
+- `withSegment` hands over the value itself as a read-only `MemorySegment`, with no copy at all, valid only during the
+  call and only in the calling thread;
+- `withBytes` and `withChars` hand over a copy on the heap, wiped when the call returns. `withChars` decodes strict
+  UTF-8 itself, without the JDK's charset decoders, which keep heap buffers of their own.
+
+The hand-over is where the library's reach ends: a consumer that keeps its own copy of the array, or makes a `String`
+of it, keeps the value on the heap.
+
+**Native access.** Guarded memory calls the C library (`mmap`, `mprotect`, `mlock`, `madvise`) through the Foreign
+Function & Memory API, so the JVM must be started with `--enable-native-access=io.descoped.secrets.api` (or
+`--enable-native-access=ALL-UNNAMED` on the class path). Without it, `SecretMemory.create` refuses. It runs on Linux
+and macOS, on x86_64 and aarch64; elsewhere it refuses too. `secrets.memory.guard=off` gives plain off-heap memory
+without any of the protection above and without native access; it is meant for tests.
+
 ## JPMS
 
 An application module `requires io.descoped.secrets.api` and nothing else. The API module declares

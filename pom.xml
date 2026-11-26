@@ -29,6 +29,8 @@
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <!-- Empty unless the coverage profile's JaCoCo agent sets it; surefire's argLine adds to it. -->
+        <argLine></argLine>
         <!-- Reproducible builds: every jar entry gets this time, so the same tag builds the same bytes.
              release:prepare sets it to the release time. -->
         <project.build.outputTimestamp>2026-11-26T16:43:00Z</project.build.outputTimestamp>
@@ -261,6 +263,11 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>3.6.1</version>
+                    <configuration>
+                        <!-- Guarded secret memory needs native access. @{argLine} keeps what the coverage
+                             profile's JaCoCo agent sets. -->
+                        <argLine>@{argLine} --enable-native-access=io.descoped.secrets.api</argLine>
+                    </configuration>
                 </plugin>
 
                 <plugin>
