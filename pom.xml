@@ -6,7 +6,7 @@
     <!-- Parent and aggregator of every module. All modules share this version and are released together. -->
     <groupId>io.descoped.secrets</groupId>
     <artifactId>secrets-client-project</artifactId>
-    <version>3.0.1-SNAPSHOT</version>
+    <version>4.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>Secrets Client Project</name>
@@ -25,13 +25,13 @@
     </modules>
 
     <properties>
-        <java.version>17</java.version>
+        <java.version>25</java.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- Reproducible builds: every jar entry gets this time, so the same tag builds the same bytes.
              release:prepare sets it to the release time. -->
-        <project.build.outputTimestamp>2026-11-23T19:52:33Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-11-26T16:43:00Z</project.build.outputTimestamp>
 
         <!-- Dependency versions. Kept as properties, not in dependencyManagement, so that importing
              secrets-client-bom (which inherits this POM) manages the secrets modules only. -->
