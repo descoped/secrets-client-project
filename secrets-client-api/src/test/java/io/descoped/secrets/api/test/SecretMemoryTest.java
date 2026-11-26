@@ -73,6 +73,22 @@ class SecretMemoryTest {
         assertTrue(memory.isLocked());
     }
 
+    /**
+     * memfd_secret depends on the kernel (5.14 and later, on by default since 6.5) and on seccomp, so on Linux this
+     * only reports it; it is never available elsewhere.
+     */
+    @Test
+    void hiddenFromTheKernelOnlyOnLinux() {
+        if (System.getProperty("os.name").startsWith("Linux")) {
+            System.out.println("memfd_secret: " + memory.isHiddenFromKernel());
+            try (Secret secret = memory.fromBytes(bytes("s3cret"))) {
+                assertEquals("s3cret", secret.withChars(String::new));
+            }
+        } else {
+            assertFalse(memory.isHiddenFromKernel());
+        }
+    }
+
     @Test
     void fromBytesCopiesAndWipesTheArgument() {
         byte[] value = bytes("s3cret");

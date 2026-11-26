@@ -50,4 +50,9 @@ public final class PlainSlab extends Slab {
     public boolean excludedFromCoreDumps() {
         return false;
     }
+
+    @Override
+    public boolean hiddenFromKernel() {
+        return false;
+    }
 }

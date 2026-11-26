@@ -143,7 +143,12 @@ try (SecretMemory memory = SecretMemory.create(configuration);
 - **Never swapped.** The pages are locked with `mlock`. With `secrets.memory.lock=required` (the default) memory that
   cannot be locked is an error: raise the locked-memory limit (`ulimit -l`, `docker run --ulimit memlock=...`), or
   set `secrets.memory.lock=preferred` to use it unlocked, which is logged once.
-- **Not in core dumps, not in a forked child** (Linux): `MADV_DONTDUMP` and `MADV_WIPEONFORK`.
+- **Not in core dumps, not in a forked child** (Linux): `MADV_DONTDUMP`, and `MADV_WIPEONFORK` (or `MADV_DONTFORK`
+  for `memfd_secret` memory).
+- **Hidden from the kernel** (Linux 5.14 and later): where the kernel offers `memfd_secret` (on by default since 6.5,
+  unless a seccomp filter blocks it), the pages come from it and are removed from the kernel's direct map, so not even
+  the kernel reaches them by accident. Otherwise anonymous pages are used, and that is logged once.
+  `SecretMemory.isHiddenFromKernel()` says which.
 - **Wiped** when a secret is closed, and wiped and unmapped when the memory is closed. A secret that becomes
   unreachable without being closed is wiped when the garbage collector finds it, and that is logged.
 

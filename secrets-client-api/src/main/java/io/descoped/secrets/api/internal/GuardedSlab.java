@@ -20,6 +20,7 @@ public final class GuardedSlab extends Slab {
     private final MemorySegment data;
     private final boolean locked;
     private final boolean excluded;
+    private final boolean hidden;
 
     /**
      * Maps a slab of at least {@code capacity} bytes, rounded up to whole pages.
@@ -37,10 +38,20 @@ public final class GuardedSlab extends Slab {
         this.dataAddress = base + page;
         boolean isLocked = false;
         boolean isExcluded = false;
+        boolean isHidden = false;
         try {
-            os.protect(dataAddress, length, Native.PROT_READ_WRITE);
+            if (os.secretMemoryAvailable()) {
+                isHidden = hide(os, dataAddress, length, lockRequired);
+            }
+            if (!isHidden) {
+                os.protect(dataAddress, length, Native.PROT_READ_WRITE);
+            }
             isExcluded = excludeFromCoreDumps(os, dataAddress, length);
-            wipeOnFork(os, dataAddress, length);
+            if (isHidden) {
+                os.dontFork(dataAddress, length);
+            } else {
+                wipeOnFork(os, dataAddress, length);
+            }
             isLocked = lock(os, dataAddress, length, lockRequired);
             os.protect(dataAddress, length, Native.PROT_NONE);
         } catch (RuntimeException e) {
@@ -53,8 +64,27 @@ public final class GuardedSlab extends Slab {
         }
         this.locked = isLocked;
         this.excluded = isExcluded;
+        this.hidden = isHidden;
         this.arena = Arena.ofShared();
         this.data = MemorySegment.ofAddress(dataAddress).reinterpret(length, arena, null);
+    }
+
+    /**
+     * Replaces the data pages with {@code memfd_secret} memory, removed from the kernel's direct map. If that fails,
+     * puts the reserved anonymous pages back and returns {@code false}, unless the failure is the locked-memory limit
+     * and locking is required ({@code memfd_secret} memory is always locked).
+     */
+    private static boolean hide(Native os, long address, long length, boolean lockRequired) {
+        try {
+            os.mapSecret(address, length);
+            return true;
+        } catch (NativeException e) {
+            os.reserveAt(address, length);
+            if (lockRequired && Native.isOverLimit(e)) {
+                throw e;
+            }
+            return false;
+        }
     }
 
     /** {@code MADV_DONTDUMP}; a kernel without it is reported through {@link #excludedFromCoreDumps()}. */
@@ -127,5 +157,10 @@ public final class GuardedSlab extends Slab {
     @Override
     public boolean excludedFromCoreDumps() {
         return excluded;
+    }
+
+    @Override
+    public boolean hiddenFromKernel() {
+        return hidden;
     }
 }

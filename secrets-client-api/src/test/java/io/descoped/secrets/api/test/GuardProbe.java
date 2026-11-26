@@ -53,7 +53,8 @@ public final class GuardProbe {
     private static void create(String lock) {
         try (SecretMemory memory = SecretMemory.create(Map.of(SecretMemory.LOCK_KEY, lock));
              Secret secret = memory.fromBytes(new byte[]{1})) {
-            System.out.println("CREATED locked=" + memory.isLocked() + " length=" + secret.length());
+            System.out.println("CREATED locked=" + memory.isLocked() + " length=" + secret.length()
+                    + " hidden=" + memory.isHiddenFromKernel());
         } catch (RuntimeException e) {
             System.out.println("REFUSED " + e.getClass().getName() + ": " + e.getMessage());
         }

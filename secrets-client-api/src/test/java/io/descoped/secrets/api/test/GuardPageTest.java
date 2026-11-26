@@ -87,8 +87,9 @@ class GuardPageTest {
         String access = "--enable-native-access=io.descoped.secrets.api,io.descoped.secrets.api.test";
 
         Result required = run(noLocking, access, "create", "required");
+        // mlock fails, or with memfd_secret its mapping does.
         assertTrue(required.output().contains("REFUSED io.descoped.secrets.api.SecretManagerException: Cannot lock"
-                + " secret memory (mlock failed: errno"), required.output());
+                + " secret memory ("), required.output());
         assertTrue(required.output().contains("secrets.memory.lock=preferred"), required.output());
 
         Result preferred = run(noLocking, access, "create", "preferred");
