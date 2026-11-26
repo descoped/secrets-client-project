@@ -37,15 +37,18 @@ import java.util.function.Function;
  */
 public final class Secret implements AutoCloseable {
 
-    private static final Cleaner CLEANER = Cleaner.create();
     private static final System.Logger LOG = System.getLogger(Secret.class.getName());
 
+    /** Keeps the memory reachable, so that it is not cleaned while this secret is in use. */
+    @SuppressWarnings("unused")
+    private final SecretMemory memory;
     private final SecretMemory.Block block;
     private final Cleaner.Cleanable cleanable;
 
-    Secret(SecretMemory.Block block) {
+    Secret(SecretMemory memory, SecretMemory.Block block) {
+        this.memory = memory;
         this.block = block;
-        this.cleanable = CLEANER.register(this, new Unreachable(block));
+        this.cleanable = SecretMemory.CLEANER.register(this, new Unreachable(block));
     }
 
     /** Frees the block of a secret that was never closed. Holds no reference to the secret. */
@@ -62,6 +65,7 @@ public final class Secret implements AutoCloseable {
     /**
      * The length of the value, in bytes.
      *
+     * @return the length
      * @throws IllegalStateException if the secret is closed
      */
     public long length() {
@@ -69,8 +73,9 @@ public final class Secret implements AutoCloseable {
     }
 
     /**
-     * Applies {@code action} to the value itself: a read-only segment, valid only during the call and only in the
-     * calling thread. Using it after the call fails; with guarded memory the pages are no longer even readable.
+     * Applies {@code action} to the value itself: a read-only segment, valid only during the call. With guarded
+     * memory, using it after the call or from another thread fails (and the pages are no longer even readable); with
+     * {@code secrets.memory.guard=off} that is not enforced.
      *
      * @param action uses the value
      * @param <R>    what {@code action} returns
@@ -143,7 +148,11 @@ public final class Secret implements AutoCloseable {
      */
     public boolean contentEquals(Secret other) {
         Objects.requireNonNull(other, "other");
-        return withSegment(a -> other.withSegment(b -> {
+        // Always lock the two in the same order, so that a.contentEquals(b) and b.contentEquals(a) cannot deadlock
+        // when closes are waiting on both.
+        Secret first = System.identityHashCode(this) <= System.identityHashCode(other) ? this : other;
+        Secret second = first == this ? other : this;
+        return first.withSegment(a -> second.withSegment(b -> {
             if (a.byteSize() != b.byteSize()) {
                 return false;
             }
@@ -162,7 +171,7 @@ public final class Secret implements AutoCloseable {
      */
     @Override
     public void close() {
-        if (block.readByCurrentThread()) {
+        if (block.heldByCurrentThread()) {
             throw new IllegalStateException("A secret cannot be closed inside one of its own callbacks");
         }
         block.markClosedExplicitly();

@@ -436,6 +436,100 @@ class SecretMemoryTest {
     }
 
     @Test
+    void closingTheMemoryWaitsForAWriterInProgress() throws Exception {
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Secret> allocation = executor.submit(() -> memory.allocate(4, segment -> {
+                writing.countDown();
+                try {
+                    assertTrue(release.await(10, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    throw new IllegalStateException(e);
+                }
+                segment.copyFrom(MemorySegment.ofArray(bytes("abcd")));
+            }));
+            assertTrue(writing.await(10, TimeUnit.SECONDS));
+            Future<?> closing = executor.submit(memory::close);
+            Thread.sleep(200);
+            assertFalse(closing.isDone(), "close waits for the writer");
+            release.countDown();
+            Secret secret = allocation.get(10, TimeUnit.SECONDS);
+            closing.get(10, TimeUnit.SECONDS);
+            assertThrows(IllegalStateException.class, secret::length);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("try")
+    void theMemoryCannotBeClosedInsideACallbackAndStaysUsable() {
+        try (Secret secret = memory.fromBytes(bytes("s3cret"))) {
+            assertThrows(IllegalStateException.class, () -> secret.withBytes(b -> {
+                memory.close();
+                return null;
+            }));
+            assertEquals("s3cret", secret.withChars(String::new));
+            try (Secret another = memory.fromBytes(bytes("more"))) {
+                assertEquals(4, another.length());
+            }
+        }
+    }
+
+    @Test
+    void contentEqualsBothWaysAtOnce() throws Exception {
+        try (Secret a = memory.fromBytes(bytes("same"));
+             Secret b = memory.fromBytes(bytes("same"));
+             ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            List<Future<Boolean>> results = new ArrayList<>();
+            for (int i = 0; i < 200; i++) {
+                results.add(executor.submit(() -> a.contentEquals(b)));
+                results.add(executor.submit(() -> b.contentEquals(a)));
+            }
+            for (Future<Boolean> result : results) {
+                assertTrue(result.get(10, TimeUnit.SECONDS));
+            }
+        }
+    }
+
+    @Test
+    void memoryThatWasNeverClosedIsUnmappedAndReported() throws Exception {
+        Logger logger = Logger.getLogger(SecretMemory.class.getName());
+        List<String> messages = new CopyOnWriteArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord logRecord) {
+                messages.add(logRecord.getMessage());
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        logger.addHandler(handler);
+        try {
+            leakMemory();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+            while (messages.isEmpty() && System.nanoTime() < deadline) {
+                System.gc();
+                Thread.sleep(20);
+            }
+            assertEquals(List.of("Secret memory was not closed; it is wiped and unmapped now that it is unreachable"),
+                    messages);
+        } finally {
+            logger.removeHandler(handler);
+        }
+    }
+
+    @SuppressWarnings("resource")
+    private static void leakMemory() {
+        SecretMemory.create(Map.of()).fromBytes(bytes("leaked")).close();
+    }
+
+    @Test
     void theSegmentIsTheValueItself() {
         try (Secret secret = memory.fromBytes(bytes("s3cret"))) {
             MemorySegment first = secret.withSegment(s -> MemorySegment.ofAddress(s.address()));

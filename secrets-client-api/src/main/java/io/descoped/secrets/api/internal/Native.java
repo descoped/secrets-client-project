@@ -195,21 +195,30 @@ public final class Native {
     }
 
     /**
-     * On Linux, keeps {@code [address, address + length)} out of core dumps and gives a forked child zeros instead of
-     * it. Nothing on macOS, which has neither.
+     * On Linux, keeps {@code [address, address + length)} out of core dumps ({@code MADV_DONTDUMP}). Nothing on macOS,
+     * which has no such advice.
+     *
+     * @return whether the range is now excluded
+     * @throws NativeException if {@code madvise} fails
+     */
+    public boolean excludeFromCoreDumps(long address, long length) {
+        if (PLATFORM != Platform.LINUX) {
+            return false;
+        }
+        call("madvise(MADV_DONTDUMP)", madvise, address, length, MADV_DONTDUMP);
+        return true;
+    }
+
+    /**
+     * On Linux, gives a forked child zeros instead of {@code [address, address + length)} ({@code MADV_WIPEONFORK},
+     * Linux 4.14 and later). Nothing on macOS.
      *
      * @throws NativeException if {@code madvise} fails
      */
-    public void exclude(long address, long length) {
+    public void wipeOnFork(long address, long length) {
         if (PLATFORM == Platform.LINUX) {
-            call("madvise(MADV_DONTDUMP)", madvise, address, length, MADV_DONTDUMP);
             call("madvise(MADV_WIPEONFORK)", madvise, address, length, MADV_WIPEONFORK);
         }
-    }
-
-    /** Whether {@link #exclude(long, long)} does anything on this platform. */
-    public boolean excludesFromCoreDumps() {
-        return PLATFORM == Platform.LINUX;
     }
 
     private void call(String name, MethodHandle handle, long address, long length) {

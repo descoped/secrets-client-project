@@ -40,11 +40,15 @@ public final class GuardedSlab extends Slab {
         try {
             os.protect(dataAddress, length, Native.PROT_READ_WRITE);
             try {
-                os.exclude(dataAddress, length);
-                isExcluded = os.excludesFromCoreDumps();
+                isExcluded = os.excludeFromCoreDumps(dataAddress, length);
             } catch (NativeException e) {
-                // A kernel without MADV_DONTDUMP or MADV_WIPEONFORK; reported through excludedFromCoreDumps().
+                // A kernel without MADV_DONTDUMP; reported through excludedFromCoreDumps().
                 isExcluded = false;
+            }
+            try {
+                os.wipeOnFork(dataAddress, length);
+            } catch (NativeException e) {
+                // A kernel before 4.14. The JVM starts processes with posix_spawn or vfork, which do not copy memory.
             }
             try {
                 os.lock(dataAddress, length);

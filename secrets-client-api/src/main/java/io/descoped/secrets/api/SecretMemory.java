@@ -10,6 +10,7 @@ import io.descoped.secrets.api.internal.Utf8;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.lang.ref.Cleaner;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -40,7 +41,9 @@ import java.util.function.Function;
  * {@code --enable-native-access=ALL-UNNAMED} when the library is on the class path. Without it, and on platforms other
  * than Linux and macOS on x86_64 or aarch64, {@link #create(Map)} refuses, unless {@value #GUARD_KEY} is {@code off}.
  *
- * <p>Thread-safe.
+ * <p>Close the memory when its secrets are no longer needed. Memory that becomes unreachable without being closed
+ * (which needs all its secrets to be unreachable too) is wiped and unmapped when the garbage collector finds it, and
+ * that is logged. Thread-safe.
  */
 public final class SecretMemory implements AutoCloseable {
 
@@ -57,20 +60,29 @@ public final class SecretMemory implements AutoCloseable {
      */
     public static final String LOCK_KEY = "secrets.memory.lock";
 
+    /** Frees what was never closed: memory here, and {@link Secret}s. */
+    static final Cleaner CLEANER = Cleaner.create();
+
     private static final System.Logger LOG = System.getLogger(SecretMemory.class.getName());
-    private static final long PLAIN_SLAB_SIZE = 4096;
 
-    private final Native os;
-    private final boolean lockRequired;
-    private final ReentrantLock lock = new ReentrantLock();
-    private final List<Slab> slabs = new ArrayList<>();
-    private final Set<Block> live = new LinkedHashSet<>();
-    private boolean unlockedLogged;
-    private boolean closed;
+    private final Pool pool;
+    private final Cleaner.Cleanable cleanable;
 
-    private SecretMemory(Native os, boolean lockRequired) {
-        this.os = os;
-        this.lockRequired = lockRequired;
+    private SecretMemory(Pool pool) {
+        this.pool = pool;
+        this.cleanable = CLEANER.register(this, new Unreachable(pool));
+    }
+
+    /** Frees the memory of a {@code SecretMemory} that was never closed. Holds no reference to it. */
+    private record Unreachable(Pool pool) implements Runnable {
+        @Override
+        public void run() {
+            if (!pool.closedExplicitly && !pool.closed) {
+                LOG.log(System.Logger.Level.WARNING,
+                        "Secret memory was not closed; it is wiped and unmapped now that it is unreachable");
+            }
+            pool.close();
+        }
     }
 
     /**
@@ -103,14 +115,9 @@ public final class SecretMemory implements AutoCloseable {
             }
             os = Native.get();
         }
-        SecretMemory memory = new SecretMemory(os, lockRequired);
-        memory.lock.lock();
-        try {
-            memory.newSlab(0);
-        } finally {
-            memory.lock.unlock();
-        }
-        return memory;
+        Pool pool = new Pool(os, lockRequired);
+        pool.start();
+        return new SecretMemory(pool);
     }
 
     private static boolean choice(Map<String, String> configuration, String key, String yes, String no) {
@@ -126,14 +133,14 @@ public final class SecretMemory implements AutoCloseable {
 
     /**
      * Allocates a secret of {@code length} bytes and lets {@code writer} fill it. The segment {@code writer} gets is
-     * writable, valid only during the call, and starts out zeroed. If {@code writer} throws, the secret is wiped and
-     * freed and the exception is passed on.
+     * writable, starts out zeroed, and is valid only during the call; with guarded memory, using it afterwards or from
+     * another thread fails. If {@code writer} throws, the secret is wiped and freed and the exception is passed on.
      *
      * @param length the length of the secret, in bytes
      * @param writer fills the secret
      * @return the secret, to close when it is no longer needed
      * @throws IllegalArgumentException if {@code length} is negative or more than {@link Integer#MAX_VALUE}
-     * @throws IllegalStateException    if the memory is closed
+     * @throws IllegalStateException    if the memory is closed, also while {@code writer} runs
      * @throws SecretManagerException   if more memory is needed and cannot be mapped or locked
      * @throws NullPointerException     if {@code writer} is {@code null}
      */
@@ -142,17 +149,18 @@ public final class SecretMemory implements AutoCloseable {
         if (length < 0 || length > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Invalid length " + length);
         }
-        Block block = take(length);
-        Secret secret = new Secret(block);
-        block.slab.beginWrite();
-        try (Arena call = Arena.ofConfined()) {
-            writer.accept(block.slab.view(block.segment(), call));
+        Block block = pool.take(length);
+        Secret secret = new Secret(this, block);
+        try {
+            block.write(writer);
         } catch (RuntimeException | Error e) {
-            block.slab.endWrite();
-            secret.close();
+            try {
+                secret.close();
+            } catch (RuntimeException suppressed) {
+                e.addSuppressed(suppressed);
+            }
             throw e;
         }
-        block.slab.endWrite();
         return secret;
     }
 
@@ -200,138 +208,229 @@ public final class SecretMemory implements AutoCloseable {
         }
     }
 
-    /** Whether the memory is guarded ({@value #GUARD_KEY} is {@code on}). */
+    /**
+     * Whether the memory is guarded ({@value #GUARD_KEY} is {@code on}).
+     *
+     * @return whether it is guarded
+     */
     public boolean isGuarded() {
-        return os != null;
-    }
-
-    /** Whether every slab so far is locked in memory. Always {@code false} when not guarded. */
-    public boolean isLocked() {
-        lock.lock();
-        try {
-            return !slabs.isEmpty() && slabs.stream().allMatch(Slab::locked);
-        } finally {
-            lock.unlock();
-        }
+        return pool.os != null;
     }
 
     /**
-     * Closes every secret still open, waiting for those being read, then wipes and unmaps all memory. Idempotent.
+     * Whether all memory mapped so far is locked in memory. Always {@code false} when not guarded.
      *
-     * @throws IllegalStateException if called inside a callback of one of its secrets
+     * @return whether it is locked
+     */
+    public boolean isLocked() {
+        return pool.isLocked();
+    }
+
+    /**
+     * Closes every secret still open, waiting for those being read or written, then wipes and unmaps all memory.
+     * Idempotent.
+     *
+     * @throws IllegalStateException if called inside a callback of one of its secrets; nothing is closed then
      */
     @Override
     public void close() {
-        List<Block> open;
-        lock.lock();
-        try {
-            if (closed) {
-                return;
-            }
-            closed = true;
-            open = new ArrayList<>(live);
-        } finally {
-            lock.unlock();
-        }
-        for (Block block : open) {
-            block.close();
-        }
-        lock.lock();
-        try {
-            for (Slab slab : slabs) {
-                slab.dispose();
-            }
-            slabs.clear();
-        } finally {
-            lock.unlock();
-        }
+        pool.checkNotInCallback();
+        pool.closedExplicitly = true;
+        cleanable.clean();
     }
 
     @Override
     public String toString() {
-        return "SecretMemory[" + (isGuarded() ? "guarded" : "unguarded") + (closed ? ", closed" : "") + "]";
+        return "SecretMemory[" + (isGuarded() ? "guarded" : "unguarded") + (pool.closed ? ", closed" : "") + "]";
     }
 
-    private Block take(long length) {
-        long size = Slab.blockSize(length);
-        lock.lock();
-        try {
-            if (closed) {
-                throw new IllegalStateException("Secret memory is closed");
+    /**
+     * The state of a {@code SecretMemory}: its slabs and open blocks. Separate from it, so that its cleaner can free
+     * the memory once the {@code SecretMemory} is unreachable.
+     */
+    static final class Pool {
+        private static final long PLAIN_SLAB_SIZE = 4096;
+
+        private final Native os;
+        private final boolean lockRequired;
+        private final ReentrantLock lock = new ReentrantLock();
+        private final List<Slab> slabs = new ArrayList<>();
+        private final Set<Block> live = new LinkedHashSet<>();
+        private boolean unlockedLogged;
+        private volatile boolean closed;
+        private volatile boolean closedExplicitly;
+
+        private Pool(Native os, boolean lockRequired) {
+            this.os = os;
+            this.lockRequired = lockRequired;
+        }
+
+        /** Maps the first slab, so that a missing permission or limit is reported at once. */
+        private void start() {
+            lock.lock();
+            try {
+                newSlab(0);
+            } finally {
+                lock.unlock();
             }
-            for (Slab slab : slabs) {
-                long offset = slab.allocate(size);
-                if (offset >= 0) {
-                    return register(slab, offset, size, length);
+        }
+
+        private boolean isLocked() {
+            lock.lock();
+            try {
+                return !slabs.isEmpty() && slabs.stream().allMatch(Slab::locked);
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        private void checkNotInCallback() {
+            lock.lock();
+            try {
+                for (Block block : live) {
+                    if (block.heldByCurrentThread()) {
+                        throw new IllegalStateException(
+                                "Secret memory cannot be closed inside a callback of one of its secrets");
+                    }
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        private Block take(long length) {
+            long size = Slab.blockSize(length);
+            lock.lock();
+            try {
+                if (closed) {
+                    throw new IllegalStateException("Secret memory is closed");
+                }
+                for (Slab slab : slabs) {
+                    long offset = slab.allocate(size);
+                    if (offset >= 0) {
+                        return register(slab, offset, size, length);
+                    }
+                }
+                Slab slab = newSlab(size);
+                return register(slab, slab.allocate(size), size, length);
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        private Block register(Slab slab, long offset, long size, long length) {
+            Block block = new Block(this, slab, offset, size, length);
+            live.add(block);
+            return block;
+        }
+
+        /** A slab with room for at least {@code size} bytes; under {@link #lock}. */
+        private Slab newSlab(long size) {
+            Slab slab;
+            if (os == null) {
+                slab = new PlainSlab(Math.max(PLAIN_SLAB_SIZE, size));
+            } else {
+                try {
+                    slab = new GuardedSlab(os, Math.max(os.pageSize(), size), lockRequired);
+                } catch (NativeException e) {
+                    throw new SecretManagerException(e.call().equals("mlock")
+                            ? "Cannot lock secret memory (" + e.getMessage() + "): the process is over its"
+                            + " locked-memory limit (RLIMIT_MEMLOCK). Raise it (ulimit -l, docker run --ulimit"
+                            + " memlock=...), or set " + LOCK_KEY + "=preferred to use it unlocked"
+                            : "Cannot map guarded secret memory: " + e.getMessage(), e);
+                }
+                if (!slab.locked() && !unlockedLogged) {
+                    unlockedLogged = true;
+                    LOG.log(System.Logger.Level.WARNING, "Secret memory could not be locked and may be swapped ("
+                            + LOCK_KEY + "=preferred); raise the locked-memory limit (RLIMIT_MEMLOCK) to lock it");
                 }
             }
-            Slab slab = newSlab(size);
-            return register(slab, slab.allocate(size), size, length);
-        } finally {
-            lock.unlock();
+            slabs.add(slab);
+            return slab;
         }
-    }
 
-    private Block register(Slab slab, long offset, long size, long length) {
-        Block block = new Block(this, slab, offset, size, length);
-        live.add(block);
-        return block;
-    }
-
-    /** A slab with room for at least {@code size} bytes; under {@link #lock}. */
-    private Slab newSlab(long size) {
-        Slab slab;
-        if (os == null) {
-            slab = new PlainSlab(Math.max(PLAIN_SLAB_SIZE, size));
-        } else {
+        private void release(Block block) {
+            lock.lock();
             try {
-                slab = new GuardedSlab(os, Math.max(os.pageSize(), size), lockRequired);
-            } catch (NativeException e) {
-                throw new SecretManagerException(e.call().equals("mlock")
-                        ? "Cannot lock secret memory (" + e.getMessage() + "): the process is over its locked-memory"
-                        + " limit (RLIMIT_MEMLOCK). Raise it (ulimit -l, docker run --ulimit memlock=...), or set "
-                        + LOCK_KEY + "=preferred to use it unlocked"
-                        : "Cannot map guarded secret memory: " + e.getMessage(), e);
-            }
-            if (!slab.locked() && !unlockedLogged) {
-                unlockedLogged = true;
-                LOG.log(System.Logger.Level.WARNING, "Secret memory could not be locked and may be swapped ("
-                        + LOCK_KEY + "=preferred); raise the locked-memory limit (RLIMIT_MEMLOCK) to lock it");
+                block.slab.free(block.offset, block.size);
+                live.remove(block);
+                if (!closed && slabs.size() > 1 && block.slab.isEmpty()) {
+                    slabs.remove(block.slab);
+                    block.slab.dispose();
+                }
+            } finally {
+                lock.unlock();
             }
         }
-        slabs.add(slab);
-        return slab;
-    }
 
-    private void release(Block block) {
-        lock.lock();
-        try {
-            block.slab.free(block.offset, block.size);
-            live.remove(block);
-            if (!closed && slabs.size() > 1 && block.slab.isEmpty()) {
-                slabs.remove(block.slab);
-                block.slab.dispose();
+        /**
+         * Closes every open block, waiting for callbacks in other threads, then wipes and unmaps every slab, even if
+         * closing a block or disposing a slab fails. Idempotent.
+         */
+        private void close() {
+            List<Block> open;
+            lock.lock();
+            try {
+                if (closed) {
+                    return;
+                }
+                closed = true;
+                open = new ArrayList<>(live);
+            } finally {
+                lock.unlock();
             }
-        } finally {
-            lock.unlock();
+            RuntimeException failure = null;
+            for (Block block : open) {
+                try {
+                    block.close();
+                } catch (RuntimeException e) {
+                    failure = add(failure, e);
+                }
+            }
+            lock.lock();
+            try {
+                for (Slab slab : slabs) {
+                    try {
+                        slab.dispose();
+                    } catch (RuntimeException e) {
+                        failure = add(failure, e);
+                    }
+                }
+                slabs.clear();
+            } finally {
+                lock.unlock();
+            }
+            if (failure != null) {
+                throw failure;
+            }
+        }
+
+        private static RuntimeException add(RuntimeException first, RuntimeException next) {
+            if (first == null) {
+                return next;
+            }
+            first.addSuppressed(next);
+            return first;
         }
     }
 
     /**
-     * The memory of one secret. Holds no reference to its {@link Secret}, so that the secret's cleaner can run.
+     * The memory of one secret. Holds no reference to its {@link Secret} or to the {@code SecretMemory}, so that their
+     * cleaners can run.
      */
     static final class Block {
-        private final SecretMemory memory;
+        private final Pool pool;
         private final Slab slab;
         private final long offset;
         private final long size;
         private final long length;
+        /** Read lock: a callback (or the writer) is using the block. Write lock: closing it. */
         private final ReentrantReadWriteLock access = new ReentrantReadWriteLock();
         private boolean closed;
-        private volatile boolean explicit;
+        private volatile boolean closedExplicitly;
 
-        private Block(SecretMemory memory, Slab slab, long offset, long size, long length) {
-            this.memory = memory;
+        private Block(Pool pool, Slab slab, long offset, long size, long length) {
+            this.pool = pool;
             this.slab = slab;
             this.offset = offset;
             this.size = size;
@@ -347,6 +446,22 @@ public final class SecretMemory implements AutoCloseable {
             try {
                 checkOpen();
                 return length;
+            } finally {
+                access.readLock().unlock();
+            }
+        }
+
+        /** Lets {@code writer} fill the block, through a writable view that is valid during the call. */
+        private void write(Consumer<? super MemorySegment> writer) {
+            access.readLock().lock();
+            try {
+                checkOpen();
+                slab.beginWrite();
+                try (Arena call = Arena.ofConfined()) {
+                    writer.accept(slab.view(segment(), call));
+                } finally {
+                    slab.endWrite();
+                }
             } finally {
                 access.readLock().unlock();
             }
@@ -370,14 +485,14 @@ public final class SecretMemory implements AutoCloseable {
 
         /** Notes that {@link Secret#close()} was called, so the cleaner does not report the secret as leaked. */
         void markClosedExplicitly() {
-            explicit = true;
+            closedExplicitly = true;
         }
 
         boolean closedExplicitly() {
-            return explicit;
+            return closedExplicitly;
         }
 
-        boolean readByCurrentThread() {
+        boolean heldByCurrentThread() {
             return access.getReadHoldCount() > 0;
         }
 
@@ -390,9 +505,9 @@ public final class SecretMemory implements AutoCloseable {
             }
         }
 
-        /** Wipes and frees the memory, after any reads in progress. Idempotent. */
+        /** Wipes and frees the memory, after any callbacks in progress. Idempotent. */
         void close() {
-            if (readByCurrentThread()) {
+            if (heldByCurrentThread()) {
                 throw new IllegalStateException("A secret cannot be closed inside one of its own callbacks");
             }
             access.writeLock().lock();
@@ -401,7 +516,7 @@ public final class SecretMemory implements AutoCloseable {
                     return;
                 }
                 closed = true;
-                memory.release(this);
+                pool.release(this);
             } finally {
                 access.writeLock().unlock();
             }
