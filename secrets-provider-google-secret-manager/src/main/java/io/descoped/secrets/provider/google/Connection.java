@@ -19,7 +19,6 @@ import java.nio.channels.SocketChannel;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Pattern;
 
 /**
  * One connection to a server, plain or TLS, over a non-blocking {@link SocketChannel} so that every wait has a
@@ -28,8 +27,6 @@ import java.util.regex.Pattern;
  * connection's own buffers hold only TLS records (ciphertext).
  */
 abstract sealed class Connection implements AutoCloseable {
-
-    private static final Pattern IP_LITERAL = Pattern.compile("[0-9.]+|.*:.*");
 
     private final SocketChannel channel;
     private final Selector selector;
@@ -84,7 +81,7 @@ abstract sealed class Connection implements AutoCloseable {
             if (!lookup.join(java.time.Duration.ofNanos(Math.max(1, deadline - System.nanoTime())))) {
                 throw new SocketTimeoutException("Timed out looking up " + host);
             }
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             throw new InterruptedIOException("Interrupted looking up " + host);
         }
@@ -248,7 +245,7 @@ abstract sealed class Connection implements AutoCloseable {
             parameters.setProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
             parameters.setEndpointIdentificationAlgorithm("HTTPS");
             // SNI carries host names only, never an IP address.
-            if (!IP_LITERAL.matcher(host).matches()) {
+            if (!isIpLiteral(host)) {
                 parameters.setServerNames(List.of(new SNIHostName(host)));
             }
             engine.setSSLParameters(parameters);
@@ -281,6 +278,10 @@ abstract sealed class Connection implements AutoCloseable {
                     }
                 }
             }
+        }
+
+        private static boolean isIpLiteral(String host) {
+            return host.indexOf(':') >= 0 || host.chars().allMatch(c -> c == '.' || c >= '0' && c <= '9');
         }
 
         private void runTasks() {

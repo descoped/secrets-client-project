@@ -225,68 +225,68 @@ final class Codec {
             }
             out = putUtf8(dst, out, cp);
         }
-    }
 
-    private static int simpleEscape(byte e) throws MalformedException {
-        return switch (e) {
-            case '"', '\\', '/' -> e;
-            case 'b' -> '\b';
-            case 'f' -> '\f';
-            case 'n' -> '\n';
-            case 'r' -> '\r';
-            case 't' -> '\t';
-            default -> throw new MalformedException("JSON escape");
-        };
-    }
-
-    private static int hex4(MemorySegment src, long at) throws MalformedException {
-        if (at + 4 > src.byteSize()) {
-            throw new MalformedException("JSON escape");
+        private static int simpleEscape(byte e) throws MalformedException {
+            return switch (e) {
+                case '"', '\\', '/' -> e;
+                case 'b' -> '\b';
+                case 'f' -> '\f';
+                case 'n' -> '\n';
+                case 'r' -> '\r';
+                case 't' -> '\t';
+                default -> throw new MalformedException("JSON escape");
+            };
         }
-        int value = 0;
-        for (int k = 0; k < 4; k++) {
-            int digit = Character.digit(get(src, at + k), 16);
-            if (digit < 0) {
+
+        private static int hex4(MemorySegment src, long at) throws MalformedException {
+            if (at + 4 > src.byteSize()) {
                 throw new MalformedException("JSON escape");
             }
-            value = value << 4 | digit;
-        }
-        return value;
-    }
-
-    private static int utf8Length(int cp) {
-        if (cp < 0x80) {
-            return 1;
-        }
-        if (cp < 0x800) {
-            return 2;
-        }
-        return cp < 0x10000 ? 3 : 4;
-    }
-
-    private static long putUtf8(MemorySegment dst, long out, int cp) {
-        int length = utf8Length(cp);
-        if (dst != null) {
-            switch (length) {
-                case 1 -> put(dst, out, cp);
-                case 2 -> {
-                    put(dst, out, 0xC0 | cp >> 6);
-                    put(dst, out + 1, 0x80 | cp & 0x3F);
+            int value = 0;
+            for (int k = 0; k < 4; k++) {
+                int digit = Character.digit(get(src, at + k), 16);
+                if (digit < 0) {
+                    throw new MalformedException("JSON escape");
                 }
-                case 3 -> {
-                    put(dst, out, 0xE0 | cp >> 12);
-                    put(dst, out + 1, 0x80 | cp >> 6 & 0x3F);
-                    put(dst, out + 2, 0x80 | cp & 0x3F);
-                }
-                default -> {
-                    put(dst, out, 0xF0 | cp >> 18);
-                    put(dst, out + 1, 0x80 | cp >> 12 & 0x3F);
-                    put(dst, out + 2, 0x80 | cp >> 6 & 0x3F);
-                    put(dst, out + 3, 0x80 | cp & 0x3F);
+                value = value << 4 | digit;
+            }
+            return value;
+        }
+
+        private static int utf8Length(int cp) {
+            if (cp < 0x80) {
+                return 1;
+            }
+            if (cp < 0x800) {
+                return 2;
+            }
+            return cp < 0x10000 ? 3 : 4;
+        }
+
+        private static long putUtf8(MemorySegment dst, long out, int cp) {
+            int length = utf8Length(cp);
+            if (dst != null) {
+                switch (length) {
+                    case 1 -> put(dst, out, cp);
+                    case 2 -> {
+                        put(dst, out, 0xC0 | cp >> 6);
+                        put(dst, out + 1, 0x80 | cp & 0x3F);
+                    }
+                    case 3 -> {
+                        put(dst, out, 0xE0 | cp >> 12);
+                        put(dst, out + 1, 0x80 | cp >> 6 & 0x3F);
+                        put(dst, out + 2, 0x80 | cp & 0x3F);
+                    }
+                    default -> {
+                        put(dst, out, 0xF0 | cp >> 18);
+                        put(dst, out + 1, 0x80 | cp >> 12 & 0x3F);
+                        put(dst, out + 2, 0x80 | cp >> 6 & 0x3F);
+                        put(dst, out + 3, 0x80 | cp & 0x3F);
+                    }
                 }
             }
+            return out + length;
         }
-        return out + length;
     }
 
     // application/x-www-form-urlencoded

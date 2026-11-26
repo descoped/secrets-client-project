@@ -157,11 +157,11 @@ final class Http {
      * then the body from the chunks into one secret.
      */
     private static Response read(Connection connection, long deadline, SecretMemory memory) throws IOException {
-        List<Secret> chunks = new ArrayList<>();
-        List<Long> lengths = new ArrayList<>();
         Framing framing = new Framing();
         long total = 0;
-        try {
+        try (Chunks received = new Chunks()) {
+            List<Secret> chunks = received.secrets;
+            List<Long> lengths = received.lengths;
             boolean ended = false;
             while (!framing.complete() && !ended) {
                 connection.awaitData(deadline);
@@ -205,24 +205,28 @@ final class Http {
                 }
             });
             return new Response(framing.status(), body);
-        } finally {
-            chunks.forEach(Secret::close);
+        }
+    }
+
+    /** The parts of a response as they arrived, closed once the body is assembled. */
+    private static final class Chunks implements AutoCloseable {
+        private final List<Secret> secrets = new ArrayList<>();
+        private final List<Long> lengths = new ArrayList<>();
+
+        @Override
+        public void close() {
+            secrets.forEach(Secret::close);
         }
     }
 
     /** Reads what has arrived into {@code segment} without waiting; notes the end of the stream in {@code end}. */
     private static long fill(Connection connection, MemorySegment segment, boolean[] end) throws IOException {
         ByteBuffer buffer = segment.asByteBuffer();
-        while (buffer.remaining() >= connection.minReadSpace()) {
-            int n = connection.readAvailable(buffer);
-            if (n < 0) {
-                end[0] = true;
-                break;
-            }
-            if (n == 0) {
-                break;
-            }
+        int n = 1;
+        while (n > 0 && buffer.remaining() >= connection.minReadSpace()) {
+            n = connection.readAvailable(buffer);
         }
+        end[0] = n < 0;
         return buffer.position();
     }
 
@@ -304,20 +308,11 @@ final class Http {
             switch (state) {
                 case HEAD -> head(b);
                 case SIZE -> size(b);
-                case SIZE_END -> {
-                    // A chunk extension, ignored, up to the line feed.
-                    if (b == '\n') {
-                        endOfSize();
-                    }
-                }
+                case SIZE_END -> extension(b);
                 case DATA_CR -> expect(b, '\r', State.DATA_LF);
                 case DATA_LF -> expect(b, '\n', State.SIZE);
                 case TRAILER -> trailer(b);
-                case TRAILER_LINE -> {
-                    if (b == '\n') {
-                        state = State.TRAILER;
-                    }
-                }
+                case TRAILER_LINE -> trailerLine(b);
                 default -> throw new ProtocolException("Unexpected framing state");
             }
         }
@@ -415,6 +410,20 @@ final class Http {
             }
             size = 0;
             sizeDigits = false;
+        }
+
+        /** A chunk extension, ignored, up to the line feed. */
+        private void extension(byte b) {
+            if (b == '\n') {
+                endOfSize();
+            }
+        }
+
+        /** Inside a trailer line, ignored, up to the line feed. */
+        private void trailerLine(byte b) {
+            if (b == '\n') {
+                state = State.TRAILER;
+            }
         }
 
         /** At the start of a trailer line: an empty line ends the body, any other is skipped. */
