@@ -67,6 +67,12 @@ change to the API or to a provider's documented behaviour needs a new major vers
 - Guarded memory (`SecretMemory`, native code in the unexported package `io.descoped.secrets.api.internal`): surefire
   runs with `--enable-native-access=io.descoped.secrets.api` (root POM). What can fault, such as reading a guard page
   or a page outside a callback, is tested in a child JVM (`GuardPageTest` runs `GuardProbe`), never in the test JVM.
+- **The canary gate.** Every path that reads or writes a secret (a provider's read, `addVersion`, token handling) has
+  a `HeapCanary` test (`secrets-test-support`): a child JVM reads a random canary only through that path, uses it,
+  and dumps its heap; the dump must hold no copy of the canary in any encoding (`assertClean`). A path is not done
+  until its canary test passes. The harness proves itself in its own tests (guarded memory is clean, a leak in each
+  encoding is found). `secrets-test-support` is never published (`maven.deploy.skip`, `skipPublishing`) and is not in
+  the BOM.
 - The Google Secret Manager tests run against `FakeGoogle`, a local server that also issues OAuth tokens for a
   generated service-account key. `GoogleSecretManagerLiveTest` calls Google only when `SECRETS_GOOGLE_TEST_PROJECT`
   is set; it is not run in CI.
