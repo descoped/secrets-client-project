@@ -151,17 +151,25 @@ public final class SecretMemory implements AutoCloseable {
         }
         Block block = pool.take(length);
         Secret secret = new Secret(this, block);
+        boolean written = false;
         try {
             block.write(writer);
-        } catch (RuntimeException | Error e) {
-            try {
-                secret.close();
-            } catch (RuntimeException suppressed) {
-                e.addSuppressed(suppressed);
+            written = true;
+        } finally {
+            if (!written) {
+                // The failure being thrown is what is reported; a failure to free comes second.
+                closeQuietly(secret);
             }
-            throw e;
         }
         return secret;
+    }
+
+    private static void closeQuietly(Secret secret) {
+        try {
+            secret.close();
+        } catch (RuntimeException _) {
+            // See allocate.
+        }
     }
 
     /**
@@ -199,7 +207,7 @@ public final class SecretMemory implements AutoCloseable {
             long length;
             try {
                 length = Utf8.encodedLength(value);
-            } catch (Utf8.MalformedException e) {
+            } catch (Utf8.MalformedException _) {
                 throw new IllegalArgumentException("The value is not valid UTF-16: it has an unpaired surrogate");
             }
             return allocate(length, segment -> Utf8.encode(value, segment));

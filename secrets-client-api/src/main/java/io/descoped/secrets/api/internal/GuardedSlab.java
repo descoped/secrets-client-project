@@ -39,25 +39,9 @@ public final class GuardedSlab extends Slab {
         boolean isExcluded = false;
         try {
             os.protect(dataAddress, length, Native.PROT_READ_WRITE);
-            try {
-                isExcluded = os.excludeFromCoreDumps(dataAddress, length);
-            } catch (NativeException e) {
-                // A kernel without MADV_DONTDUMP; reported through excludedFromCoreDumps().
-                isExcluded = false;
-            }
-            try {
-                os.wipeOnFork(dataAddress, length);
-            } catch (NativeException e) {
-                // A kernel before 4.14. The JVM starts processes with posix_spawn or vfork, which do not copy memory.
-            }
-            try {
-                os.lock(dataAddress, length);
-                isLocked = true;
-            } catch (NativeException e) {
-                if (lockRequired) {
-                    throw e;
-                }
-            }
+            isExcluded = excludeFromCoreDumps(os, dataAddress, length);
+            wipeOnFork(os, dataAddress, length);
+            isLocked = lock(os, dataAddress, length, lockRequired);
             os.protect(dataAddress, length, Native.PROT_NONE);
         } catch (RuntimeException e) {
             try {
@@ -71,6 +55,40 @@ public final class GuardedSlab extends Slab {
         this.excluded = isExcluded;
         this.arena = Arena.ofShared();
         this.data = MemorySegment.ofAddress(dataAddress).reinterpret(length, arena, null);
+    }
+
+    /** {@code MADV_DONTDUMP}; a kernel without it is reported through {@link #excludedFromCoreDumps()}. */
+    private static boolean excludeFromCoreDumps(Native os, long address, long length) {
+        try {
+            return os.excludeFromCoreDumps(address, length);
+        } catch (NativeException _) {
+            return false;
+        }
+    }
+
+    /**
+     * {@code MADV_WIPEONFORK}. A kernel before 4.14 lacks it, which matters little: the JVM starts processes with
+     * {@code posix_spawn} or {@code vfork}, which do not copy memory.
+     */
+    private static void wipeOnFork(Native os, long address, long length) {
+        try {
+            os.wipeOnFork(address, length);
+        } catch (NativeException _) {
+            // Not available; see above.
+        }
+    }
+
+    /** Locks the pages; a failure is an error only if locking is required. */
+    private static boolean lock(Native os, long address, long length, boolean required) {
+        try {
+            os.lock(address, length);
+            return true;
+        } catch (NativeException e) {
+            if (required) {
+                throw e;
+            }
+            return false;
+        }
     }
 
     @Override

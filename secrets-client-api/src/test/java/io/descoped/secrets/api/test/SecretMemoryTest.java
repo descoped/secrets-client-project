@@ -20,11 +20,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.logging.Handler;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -166,7 +163,8 @@ class SecretMemoryTest {
             throw new IllegalStateException("writer failed");
         }));
         // The writer's view is no longer valid.
-        assertThrows(IllegalStateException.class, () -> kept.get().get(ValueLayout.JAVA_BYTE, 0));
+        MemorySegment writerView = kept.get();
+        assertThrows(IllegalStateException.class, () -> writerView.get(ValueLayout.JAVA_BYTE, 0));
     }
 
     @Test
@@ -181,12 +179,13 @@ class SecretMemoryTest {
                 kept.set(segment);
                 return null;
             });
-            assertThrows(IllegalStateException.class, () -> kept.get().get(ValueLayout.JAVA_BYTE, 0));
+            MemorySegment view = kept.get();
+            assertThrows(IllegalStateException.class, () -> view.get(ValueLayout.JAVA_BYTE, 0));
         }
     }
 
     @Test
-    void theSegmentCannotBeUsedFromAnotherThread() throws Exception {
+    void theSegmentCannotBeUsedFromAnotherThread() {
         try (Secret secret = memory.fromBytes(bytes("s3cret"));
              ExecutorService executor = Executors.newSingleThreadExecutor()) {
             secret.withSegment(segment -> {
@@ -248,7 +247,8 @@ class SecretMemoryTest {
         memory.close();
         memory.close();
         assertThrows(IllegalStateException.class, secret::length);
-        assertThrows(IllegalStateException.class, () -> memory.fromBytes(bytes("x")));
+        byte[] value = bytes("x");
+        assertThrows(IllegalStateException.class, () -> memory.fromBytes(value));
         secret.close();
     }
 
@@ -292,11 +292,7 @@ class SecretMemoryTest {
             for (int i = 0; i < 4; i++) {
                 readers.add(executor.submit(() -> secret.withBytes(b -> {
                     reading.countDown();
-                    try {
-                        assertTrue(release.await(10, TimeUnit.SECONDS));
-                    } catch (InterruptedException e) {
-                        throw new IllegalStateException(e);
-                    }
+                    await(release);
                     return new String(b, StandardCharsets.UTF_8);
                 })));
             }
@@ -358,44 +354,22 @@ class SecretMemoryTest {
 
     @Test
     void invalidConfigurationIsRefused() {
+        Map<String, String> maybe = Map.of(SecretMemory.GUARD_KEY, "maybe");
         IllegalArgumentException guard = assertThrows(IllegalArgumentException.class,
-                () -> SecretMemory.create(Map.of(SecretMemory.GUARD_KEY, "maybe")));
+                () -> SecretMemory.create(maybe));
         assertEquals("Invalid secrets.memory.guard 'maybe': on or off", guard.getMessage());
-        assertThrows(IllegalArgumentException.class,
-                () -> SecretMemory.create(Map.of(SecretMemory.LOCK_KEY, "never")));
+        Map<String, String> never = Map.of(SecretMemory.LOCK_KEY, "never");
+        assertThrows(IllegalArgumentException.class, () -> SecretMemory.create(never));
         assertThrows(IllegalArgumentException.class, () -> memory.allocate(-1, s -> { }));
         assertThrows(NullPointerException.class, () -> memory.fromBytes(null));
     }
 
     @Test
     void aSecretThatWasNeverClosedIsWipedAndReported() throws Exception {
-        Logger logger = Logger.getLogger(Secret.class.getName());
-        List<String> messages = new CopyOnWriteArrayList<>();
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord logRecord) {
-                messages.add(logRecord.getMessage());
-            }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
-        };
-        logger.addHandler(handler);
-        try {
+        try (LogCapture log = new LogCapture(Secret.class)) {
             leak();
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
-            while (messages.isEmpty() && System.nanoTime() < deadline) {
-                System.gc();
-                Thread.sleep(20);
-            }
-            assertEquals(List.of("A secret was not closed; it is wiped now that it is unreachable"), messages);
-        } finally {
-            logger.removeHandler(handler);
+            assertEquals(List.of("A secret was not closed; it is wiped now that it is unreachable"),
+                    log.collectUntilLogged(20));
         }
     }
 
@@ -406,32 +380,9 @@ class SecretMemoryTest {
 
     @Test
     void aClosedSecretIsNotReportedWhenCollected() throws Exception {
-        Logger logger = Logger.getLogger(Secret.class.getName());
-        List<String> messages = new CopyOnWriteArrayList<>();
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord logRecord) {
-                messages.add(logRecord.getMessage());
-            }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
-        };
-        logger.addHandler(handler);
-        try {
+        try (LogCapture log = new LogCapture(Secret.class)) {
             memory.fromBytes(bytes("closed")).close();
-            for (int i = 0; i < 20; i++) {
-                System.gc();
-                Thread.sleep(10);
-            }
-            assertEquals(List.of(), messages);
-        } finally {
-            logger.removeHandler(handler);
+            assertEquals(List.of(), log.collectUntilLogged(1));
         }
     }
 
@@ -442,21 +393,26 @@ class SecretMemoryTest {
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<Secret> allocation = executor.submit(() -> memory.allocate(4, segment -> {
                 writing.countDown();
-                try {
-                    assertTrue(release.await(10, TimeUnit.SECONDS));
-                } catch (InterruptedException e) {
-                    throw new IllegalStateException(e);
-                }
+                await(release);
                 segment.copyFrom(MemorySegment.ofArray(bytes("abcd")));
             }));
             assertTrue(writing.await(10, TimeUnit.SECONDS));
             Future<?> closing = executor.submit(memory::close);
-            Thread.sleep(200);
-            assertFalse(closing.isDone(), "close waits for the writer");
+            assertThrows(TimeoutException.class, () -> closing.get(200, TimeUnit.MILLISECONDS),
+                    "close waits for the writer");
             release.countDown();
             Secret secret = allocation.get(10, TimeUnit.SECONDS);
             closing.get(10, TimeUnit.SECONDS);
             assertThrows(IllegalStateException.class, secret::length);
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            assertTrue(latch.await(10, TimeUnit.SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
         }
     }
 
@@ -493,34 +449,10 @@ class SecretMemoryTest {
 
     @Test
     void memoryThatWasNeverClosedIsUnmappedAndReported() throws Exception {
-        Logger logger = Logger.getLogger(SecretMemory.class.getName());
-        List<String> messages = new CopyOnWriteArrayList<>();
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord logRecord) {
-                messages.add(logRecord.getMessage());
-            }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
-        };
-        logger.addHandler(handler);
-        try {
+        try (LogCapture log = new LogCapture(SecretMemory.class)) {
             leakMemory();
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
-            while (messages.isEmpty() && System.nanoTime() < deadline) {
-                System.gc();
-                Thread.sleep(20);
-            }
             assertEquals(List.of("Secret memory was not closed; it is wiped and unmapped now that it is unreachable"),
-                    messages);
-        } finally {
-            logger.removeHandler(handler);
+                    log.collectUntilLogged(20));
         }
     }
 

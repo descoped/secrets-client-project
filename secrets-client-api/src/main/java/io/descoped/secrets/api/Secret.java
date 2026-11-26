@@ -38,6 +38,7 @@ import java.util.function.Function;
 public final class Secret implements AutoCloseable {
 
     private static final System.Logger LOG = System.getLogger(Secret.class.getName());
+    private static final String ACTION = "action";
 
     /** Keeps the memory reachable, so that it is not cleaned while this secret is in use. */
     @SuppressWarnings("unused")
@@ -84,7 +85,7 @@ public final class Secret implements AutoCloseable {
      * @throws NullPointerException  if {@code action} is {@code null}
      */
     public <R> R withSegment(Function<? super MemorySegment, ? extends R> action) {
-        Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(action, ACTION);
         return block.read(action);
     }
 
@@ -98,7 +99,7 @@ public final class Secret implements AutoCloseable {
      * @throws NullPointerException  if {@code action} is {@code null}
      */
     public <R> R withBytes(Function<? super byte[], ? extends R> action) {
-        Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(action, ACTION);
         return block.read(segment -> {
             byte[] bytes = segment.toArray(ValueLayout.JAVA_BYTE);
             try {
@@ -122,12 +123,12 @@ public final class Secret implements AutoCloseable {
      * @throws NullPointerException   if {@code action} is {@code null}
      */
     public <R> R withChars(Function<? super char[], ? extends R> action) {
-        Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(action, ACTION);
         return block.read(segment -> {
             char[] chars;
             try {
                 chars = Utf8.decode(segment);
-            } catch (Utf8.MalformedException e) {
+            } catch (Utf8.MalformedException _) {
                 throw new SecretManagerException("The secret is not valid UTF-8");
             }
             try {

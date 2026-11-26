@@ -51,64 +51,74 @@ public final class Utf8 {
         long i = 0;
         int n = 0;
         while (i < size) {
-            int b0 = at(bytes, i);
-            if (b0 < 0x80) {
-                if (out != null) {
-                    out[n] = (char) b0;
-                }
-                n++;
-                i++;
-                continue;
-            }
-            int count;
-            int min;
-            int max = 0xBF;
-            int codePoint;
-            if (b0 >= 0xC2 && b0 <= 0xDF) {
-                count = 1;
-                min = 0x80;
-                codePoint = b0 & 0x1F;
-            } else if (b0 >= 0xE0 && b0 <= 0xEF) {
-                count = 2;
-                min = b0 == 0xE0 ? 0xA0 : 0x80;
-                max = b0 == 0xED ? 0x9F : 0xBF;
-                codePoint = b0 & 0x0F;
-            } else if (b0 >= 0xF0 && b0 <= 0xF4) {
-                count = 3;
-                min = b0 == 0xF0 ? 0x90 : 0x80;
-                max = b0 == 0xF4 ? 0x8F : 0xBF;
-                codePoint = b0 & 0x07;
-            } else {
-                throw new MalformedException();
-            }
+            int lead = at(bytes, i);
+            int count = continuations(lead);
             // The continuation bytes are at i + 1 .. i + count.
             if (i + count >= size) {
                 throw new MalformedException();
             }
+            int codePoint = count == 0 ? lead : lead & (0x3F >> count);
             for (int k = 1; k <= count; k++) {
                 int b = at(bytes, i + k);
-                int low = k == 1 ? min : 0x80;
-                int high = k == 1 ? max : 0xBF;
-                if (b < low || b > high) {
+                if (b < (k == 1 ? secondMin(lead) : 0x80) || b > (k == 1 ? secondMax(lead) : 0xBF)) {
                     throw new MalformedException();
                 }
                 codePoint = codePoint << 6 | b & 0x3F;
             }
-            if (codePoint >= 0x10000) {
-                if (out != null) {
-                    out[n] = Character.highSurrogate(codePoint);
-                    out[n + 1] = Character.lowSurrogate(codePoint);
-                }
-                n += 2;
-            } else {
-                if (out != null) {
-                    out[n] = (char) codePoint;
-                }
-                n++;
-            }
+            n += put(out, n, codePoint);
             i += count + 1;
         }
         return n;
+    }
+
+    /** The number of continuation bytes after {@code lead}. */
+    private static int continuations(int lead) throws MalformedException {
+        if (lead < 0x80) {
+            return 0;
+        }
+        if (lead >= 0xC2 && lead <= 0xDF) {
+            return 1;
+        }
+        if (lead >= 0xE0 && lead <= 0xEF) {
+            return 2;
+        }
+        if (lead >= 0xF0 && lead <= 0xF4) {
+            return 3;
+        }
+        throw new MalformedException();
+    }
+
+    /** The lowest second byte after {@code lead}: higher after E0 and F0, which rules out overlong forms. */
+    private static int secondMin(int lead) {
+        return switch (lead) {
+            case 0xE0 -> 0xA0;
+            case 0xF0 -> 0x90;
+            default -> 0x80;
+        };
+    }
+
+    /** The highest second byte after {@code lead}: lower after ED (no surrogates) and F4 (nothing above U+10FFFF). */
+    private static int secondMax(int lead) {
+        return switch (lead) {
+            case 0xED -> 0x9F;
+            case 0xF4 -> 0x8F;
+            default -> 0xBF;
+        };
+    }
+
+    /** Puts {@code codePoint} at {@code out[n]} unless {@code out} is {@code null}; returns how many chars it takes. */
+    private static int put(char[] out, int n, int codePoint) {
+        if (codePoint < 0x10000) {
+            if (out != null) {
+                out[n] = (char) codePoint;
+            }
+            return 1;
+        }
+        if (out != null) {
+            out[n] = Character.highSurrogate(codePoint);
+            out[n + 1] = Character.lowSurrogate(codePoint);
+        }
+        return 2;
     }
 
     private static int at(MemorySegment bytes, long index) {
@@ -122,23 +132,28 @@ public final class Utf8 {
      */
     public static long encodedLength(char[] chars) throws MalformedException {
         long length = 0;
-        for (int i = 0; i < chars.length; i++) {
+        int i = 0;
+        while (i < chars.length) {
             char c = chars[i];
-            if (c < 0x80) {
-                length += 1;
-            } else if (c < 0x800) {
-                length += 2;
-            } else if (Character.isHighSurrogate(c)) {
+            if (Character.isHighSurrogate(c)) {
                 if (i + 1 >= chars.length || !Character.isLowSurrogate(chars[i + 1])) {
                     throw new MalformedException();
                 }
                 length += 4;
-                i++;
-            } else if (Character.isLowSurrogate(c)) {
+                i += 2;
+                continue;
+            }
+            if (Character.isLowSurrogate(c)) {
                 throw new MalformedException();
+            }
+            if (c < 0x80) {
+                length += 1;
+            } else if (c < 0x800) {
+                length += 2;
             } else {
                 length += 3;
             }
+            i++;
         }
         return length;
     }
@@ -149,28 +164,41 @@ public final class Utf8 {
      */
     public static void encode(char[] chars, MemorySegment out) {
         long o = 0;
-        for (int i = 0; i < chars.length; i++) {
+        int i = 0;
+        while (i < chars.length) {
             int c = chars[i];
             if (Character.isHighSurrogate(chars[i])) {
                 c = Character.toCodePoint(chars[i], chars[i + 1]);
+                i += 2;
+            } else {
                 i++;
             }
-            if (c < 0x80) {
-                put(out, o++, c);
-            } else if (c < 0x800) {
-                put(out, o++, 0xC0 | c >> 6);
-                put(out, o++, 0x80 | c & 0x3F);
-            } else if (c < 0x10000) {
-                put(out, o++, 0xE0 | c >> 12);
-                put(out, o++, 0x80 | c >> 6 & 0x3F);
-                put(out, o++, 0x80 | c & 0x3F);
-            } else {
-                put(out, o++, 0xF0 | c >> 18);
-                put(out, o++, 0x80 | c >> 12 & 0x3F);
-                put(out, o++, 0x80 | c >> 6 & 0x3F);
-                put(out, o++, 0x80 | c & 0x3F);
-            }
+            o = encode(c, out, o);
         }
+    }
+
+    /** Writes {@code c} as UTF-8 at {@code out[o]}; returns the offset after it. */
+    private static long encode(int c, MemorySegment out, long o) {
+        if (c < 0x80) {
+            put(out, o, c);
+            return o + 1;
+        }
+        if (c < 0x800) {
+            put(out, o, 0xC0 | c >> 6);
+            put(out, o + 1, 0x80 | c & 0x3F);
+            return o + 2;
+        }
+        if (c < 0x10000) {
+            put(out, o, 0xE0 | c >> 12);
+            put(out, o + 1, 0x80 | c >> 6 & 0x3F);
+            put(out, o + 2, 0x80 | c & 0x3F);
+            return o + 3;
+        }
+        put(out, o, 0xF0 | c >> 18);
+        put(out, o + 1, 0x80 | c >> 12 & 0x3F);
+        put(out, o + 2, 0x80 | c >> 6 & 0x3F);
+        put(out, o + 3, 0x80 | c & 0x3F);
+        return o + 4;
     }
 
     private static void put(MemorySegment out, long index, int b) {

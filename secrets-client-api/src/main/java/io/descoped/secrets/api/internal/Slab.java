@@ -194,7 +194,14 @@ public abstract sealed class Slab permits GuardedSlab, PlainSlab {
     }
 
     private void update() {
-        int wanted = writers > 0 ? Native.PROT_READ_WRITE : readers > 0 ? Native.PROT_READ : Native.PROT_NONE;
+        int wanted;
+        if (writers > 0) {
+            wanted = Native.PROT_READ_WRITE;
+        } else if (readers > 0) {
+            wanted = Native.PROT_READ;
+        } else {
+            wanted = Native.PROT_NONE;
+        }
         if (wanted != protection) {
             applyProtection(wanted);
             protection = wanted;
