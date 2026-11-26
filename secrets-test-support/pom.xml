@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.descoped.secrets</groupId>
+        <artifactId>secrets-client-project</artifactId>
+        <version>4.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>secrets-test-support</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Secrets Test Support</name>
+    <description>Test support for the modules of this reactor: the canary heap-dump harness. Never published.</description>
+
+    <properties>
+        <!-- Used by the other modules' tests only: never deployed to maven.descoped.io, never published to Central. -->
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <skipPublishing>true</skipPublishing>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.descoped.secrets</groupId>
+            <artifactId>secrets-client-api</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>
