@@ -57,18 +57,28 @@ public final class Utf8 {
             if (i + count >= size) {
                 throw new MalformedException();
             }
-            int codePoint = count == 0 ? lead : lead & (0x3F >> count);
-            for (int k = 1; k <= count; k++) {
-                int b = at(bytes, i + k);
-                if (b < (k == 1 ? secondMin(lead) : 0x80) || b > (k == 1 ? secondMax(lead) : 0xBF)) {
-                    throw new MalformedException();
-                }
-                codePoint = codePoint << 6 | b & 0x3F;
-            }
-            n += put(out, n, codePoint);
+            n += put(out, n, codePoint(bytes, i, lead, count));
             i += count + 1;
         }
         return n;
+    }
+
+    /** The code point of the sequence at {@code i}: {@code lead} and {@code count} continuation bytes. */
+    private static int codePoint(MemorySegment bytes, long i, int lead, int count) throws MalformedException {
+        if (count == 0) {
+            return lead;
+        }
+        int codePoint = lead & (0x3F >> count);
+        for (int k = 1; k <= count; k++) {
+            int b = at(bytes, i + k);
+            int min = k == 1 ? secondMin(lead) : 0x80;
+            int max = k == 1 ? secondMax(lead) : 0xBF;
+            if (b < min || b > max) {
+                throw new MalformedException();
+            }
+            codePoint = codePoint << 6 | b & 0x3F;
+        }
+        return codePoint;
     }
 
     /** The number of continuation bytes after {@code lead}. */
