@@ -52,7 +52,8 @@ public final class GuardedSlab extends Slab {
             } else {
                 wipeOnFork(os, dataAddress, length);
             }
-            isLocked = lock(os, dataAddress, length, lockRequired);
+            // memfd_secret memory is locked already, and mlock on it fails (the kernel cannot pin its pages).
+            isLocked = isHidden || lock(os, dataAddress, length, lockRequired);
             os.protect(dataAddress, length, Native.PROT_NONE);
         } catch (RuntimeException e) {
             try {
@@ -136,7 +137,7 @@ public final class GuardedSlab extends Slab {
         data.fill((byte) 0);
         arena.close();
         try {
-            if (locked) {
+            if (locked && !hidden) {
                 os.unlock(dataAddress, capacity());
             }
         } finally {
