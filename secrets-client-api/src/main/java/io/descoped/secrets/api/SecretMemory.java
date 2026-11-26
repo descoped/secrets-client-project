@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -30,9 +31,11 @@ import java.util.function.Function;
  * <p>Secrets share slabs of whole pages. Each slab has a guard page before and after it that is never accessible, so
  * reading or writing past either end faults instead of reaching other memory. A slab's pages are
  * <ul>
+ *     <li>on Linux 5.14 and later, {@code memfd_secret} memory where the kernel offers it: removed from the kernel's
+ *     own direct map, so that not even the kernel reaches them by accident ({@link #isHiddenFromKernel()});</li>
  *     <li>locked in memory with {@code mlock}, so they are never swapped ({@value #LOCK_KEY});</li>
- *     <li>on Linux, kept out of core dumps ({@code MADV_DONTDUMP}) and zeroed in a forked child
- *     ({@code MADV_WIPEONFORK});</li>
+ *     <li>on Linux, kept out of core dumps ({@code MADV_DONTDUMP}) and out of a forked child ({@code MADV_WIPEONFORK},
+ *     or {@code MADV_DONTFORK} for {@code memfd_secret} memory);</li>
  *     <li>not accessible at all ({@code PROT_NONE}) unless a secret on them is being read, written or wiped;</li>
  *     <li>wiped when a secret is closed, and wiped and unmapped when the memory is closed.</li>
  * </ul>
@@ -64,6 +67,7 @@ public final class SecretMemory implements AutoCloseable {
     static final Cleaner CLEANER = Cleaner.create();
 
     private static final System.Logger LOG = System.getLogger(SecretMemory.class.getName());
+    private static final AtomicBoolean BACKING_LOGGED = new AtomicBoolean();
 
     private final Pool pool;
     private final Cleaner.Cleanable cleanable;
@@ -226,12 +230,24 @@ public final class SecretMemory implements AutoCloseable {
     }
 
     /**
-     * Whether all memory mapped so far is locked in memory. Always {@code false} when not guarded.
+     * Whether all memory mapped so far is locked in memory. Always {@code false} when not guarded, and after
+     * {@link #close()}.
      *
      * @return whether it is locked
      */
     public boolean isLocked() {
         return pool.isLocked();
+    }
+
+    /**
+     * Whether all memory mapped so far comes from {@code memfd_secret} (Linux 5.14 and later, where the kernel offers
+     * it): pages removed from the kernel's direct map. {@code false} on macOS, on older or restricted kernels, when
+     * not guarded, and after {@link #close()}.
+     *
+     * @return whether it is hidden from the kernel
+     */
+    public boolean isHiddenFromKernel() {
+        return pool.isHiddenFromKernel();
     }
 
     /**
@@ -278,6 +294,15 @@ public final class SecretMemory implements AutoCloseable {
             lock.lock();
             try {
                 newSlab(0);
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        private boolean isHiddenFromKernel() {
+            lock.lock();
+            try {
+                return !slabs.isEmpty() && slabs.stream().allMatch(Slab::hiddenFromKernel);
             } finally {
                 lock.unlock();
             }
@@ -347,6 +372,7 @@ public final class SecretMemory implements AutoCloseable {
                             + " memlock=...), or set " + LOCK_KEY + "=preferred to use it unlocked"
                             : "Cannot map guarded secret memory: " + e.getMessage(), e);
                 }
+                logBacking(slab);
                 if (!slab.locked() && !unlockedLogged) {
                     unlockedLogged = true;
                     LOG.log(System.Logger.Level.WARNING, "Secret memory could not be locked and may be swapped ("
@@ -355,6 +381,23 @@ public final class SecretMemory implements AutoCloseable {
             }
             slabs.add(slab);
             return slab;
+        }
+
+        /** Says once per JVM whether Linux memory comes from {@code memfd_secret}, and if not, why. */
+        private void logBacking(Slab slab) {
+            if (Native.platform() != Native.Platform.LINUX || !BACKING_LOGGED.compareAndSet(false, true)) {
+                return;
+            }
+            if (slab.hiddenFromKernel()) {
+                LOG.log(System.Logger.Level.DEBUG, "Secret memory uses memfd_secret: removed from the kernel's direct"
+                        + " map");
+            } else if (os.secretMemoryAvailable()) {
+                LOG.log(System.Logger.Level.INFO, "memfd_secret is available but could not be used (over the"
+                        + " locked-memory limit, or out of memory); secret memory uses anonymous pages");
+            } else {
+                LOG.log(System.Logger.Level.INFO, "memfd_secret is not available (kernel before 5.14, disabled, or"
+                        + " blocked by seccomp); secret memory uses anonymous pages");
+            }
         }
 
         private void release(Block block) {

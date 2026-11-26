@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -39,7 +40,12 @@ class GuardPageTest {
         String java = ProcessHandle.current().info().command()
                 .orElse(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         List<String> command = new ArrayList<>(prefix);
-        command.addAll(List.of(java, access,
+        command.add(java);
+        // The coverage profile's JaCoCo agent, so that what runs in the child counts too (it appends to the same file).
+        ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
+                .filter(argument -> argument.startsWith("-javaagent:"))
+                .forEach(command::add);
+        command.addAll(List.of(access,
                 "-XX:-CreateCoredumpOnCrash", "-XX:ErrorFile=" + dir.resolve("hs_err_%p.log"),
                 "--module-path", System.getProperty("jdk.module.path"),
                 "--module", "io.descoped.secrets.api.test/io.descoped.secrets.api.test.GuardProbe"));
@@ -87,8 +93,9 @@ class GuardPageTest {
         String access = "--enable-native-access=io.descoped.secrets.api,io.descoped.secrets.api.test";
 
         Result required = run(noLocking, access, "create", "required");
+        // mlock fails, or with memfd_secret its mapping does.
         assertTrue(required.output().contains("REFUSED io.descoped.secrets.api.SecretManagerException: Cannot lock"
-                + " secret memory (mlock failed: errno"), required.output());
+                + " secret memory ("), required.output());
         assertTrue(required.output().contains("secrets.memory.lock=preferred"), required.output());
 
         Result preferred = run(noLocking, access, "create", "preferred");

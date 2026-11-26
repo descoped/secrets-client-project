@@ -20,6 +20,7 @@ public final class GuardedSlab extends Slab {
     private final MemorySegment data;
     private final boolean locked;
     private final boolean excluded;
+    private final boolean hidden;
 
     /**
      * Maps a slab of at least {@code capacity} bytes, rounded up to whole pages.
@@ -37,11 +38,22 @@ public final class GuardedSlab extends Slab {
         this.dataAddress = base + page;
         boolean isLocked = false;
         boolean isExcluded = false;
+        boolean isHidden = false;
         try {
-            os.protect(dataAddress, length, Native.PROT_READ_WRITE);
+            if (os.secretMemoryAvailable()) {
+                isHidden = hide(os, dataAddress, length);
+            }
+            if (!isHidden) {
+                os.protect(dataAddress, length, Native.PROT_READ_WRITE);
+            }
             isExcluded = excludeFromCoreDumps(os, dataAddress, length);
-            wipeOnFork(os, dataAddress, length);
-            isLocked = lock(os, dataAddress, length, lockRequired);
+            if (isHidden) {
+                os.dontFork(dataAddress, length);
+            } else {
+                wipeOnFork(os, dataAddress, length);
+            }
+            // memfd_secret memory is locked already, and mlock on it fails (the kernel cannot pin its pages).
+            isLocked = isHidden || lock(os, dataAddress, length, lockRequired);
             os.protect(dataAddress, length, Native.PROT_NONE);
         } catch (RuntimeException e) {
             try {
@@ -53,8 +65,30 @@ public final class GuardedSlab extends Slab {
         }
         this.locked = isLocked;
         this.excluded = isExcluded;
+        this.hidden = isHidden;
         this.arena = Arena.ofShared();
         this.data = MemorySegment.ofAddress(dataAddress).reinterpret(length, arena, null);
+    }
+
+    /**
+     * Replaces the data pages with {@code memfd_secret} memory, removed from the kernel's direct map. If that fails
+     * for any reason, puts the reserved anonymous pages back and returns {@code false}: the slab then uses anonymous
+     * pages, and {@code mlock} on them applies the locking policy (over the locked-memory limit, {@code memfd_secret}
+     * fails too).
+     */
+    private static boolean hide(Native os, long address, long length) {
+        try {
+            os.mapSecret(address, length);
+            return true;
+        } catch (NativeException e) {
+            try {
+                os.reserveAt(address, length);
+            } catch (RuntimeException restore) {
+                restore.addSuppressed(e);
+                throw restore;
+            }
+            return false;
+        }
     }
 
     /** {@code MADV_DONTDUMP}; a kernel without it is reported through {@link #excludedFromCoreDumps()}. */
@@ -106,7 +140,7 @@ public final class GuardedSlab extends Slab {
         data.fill((byte) 0);
         arena.close();
         try {
-            if (locked) {
+            if (locked && !hidden) {
                 os.unlock(dataAddress, capacity());
             }
         } finally {
@@ -127,5 +161,10 @@ public final class GuardedSlab extends Slab {
     @Override
     public boolean excludedFromCoreDumps() {
         return excluded;
+    }
+
+    @Override
+    public boolean hiddenFromKernel() {
+        return hidden;
     }
 }

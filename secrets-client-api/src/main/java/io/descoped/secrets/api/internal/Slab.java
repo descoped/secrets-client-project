@@ -51,6 +51,9 @@ public abstract sealed class Slab permits GuardedSlab, PlainSlab {
     /** Whether the slab's pages are kept out of core dumps. */
     public abstract boolean excludedFromCoreDumps();
 
+    /** Whether the slab's pages come from {@code memfd_secret}, removed from the kernel's direct map. */
+    public abstract boolean hiddenFromKernel();
+
     /** The size a block of {@code length} bytes takes. */
     public static long blockSize(long length) {
         return Math.max(ALIGNMENT, (length + ALIGNMENT - 1) / ALIGNMENT * ALIGNMENT);

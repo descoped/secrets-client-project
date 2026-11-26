@@ -143,7 +143,13 @@ try (SecretMemory memory = SecretMemory.create(configuration);
 - **Never swapped.** The pages are locked with `mlock`. With `secrets.memory.lock=required` (the default) memory that
   cannot be locked is an error: raise the locked-memory limit (`ulimit -l`, `docker run --ulimit memlock=...`), or
   set `secrets.memory.lock=preferred` to use it unlocked, which is logged once.
-- **Not in core dumps, not in a forked child** (Linux): `MADV_DONTDUMP` and `MADV_WIPEONFORK`.
+- **Not in core dumps, not in a forked child** (Linux): `MADV_DONTDUMP`, and `MADV_WIPEONFORK` (or `MADV_DONTFORK`
+  for `memfd_secret` memory).
+- **Hidden from the kernel** (Linux 5.14 and later): where the kernel offers `memfd_secret` (on by default since 6.5,
+  unless a seccomp filter blocks it), the pages come from it and are removed from the kernel's direct map, so not even
+  the kernel reaches them by accident. Otherwise anonymous pages are used, and that is logged once.
+  `SecretMemory.isHiddenFromKernel()` says which. While any `memfd_secret` memory exists, Linux refuses to hibernate
+  (suspend to disk), which matters on a desktop or laptop.
 - **Wiped** when a secret is closed, and wiped and unmapped when the memory is closed. A secret that becomes
   unreachable without being closed is wiped when the garbage collector finds it, and that is logged.
 
@@ -157,8 +163,9 @@ The value is reached only inside a callback:
 The hand-over is where the library's reach ends: a consumer that keeps its own copy of the array, or makes a `String`
 of it, keeps the value on the heap.
 
-**Native access.** Guarded memory calls the C library (`mmap`, `mprotect`, `mlock`, `madvise`) through the Foreign
-Function & Memory API, so the JVM must be started with `--enable-native-access=io.descoped.secrets.api` (or
+**Native access.** Guarded memory calls the C library (`mmap`, `mprotect`, `mlock`, `munlock`, `munmap`, `madvise`,
+`getpagesize`; on Linux also `ftruncate`, `close`, and `syscall` for `memfd_secret` and `getrandom`, which a seccomp
+profile must allow) through the Foreign Function & Memory API, so the JVM must be started with `--enable-native-access=io.descoped.secrets.api` (or
 `--enable-native-access=ALL-UNNAMED` on the class path). Without it, `SecretMemory.create` refuses. It runs on Linux
 and macOS, on x86_64 and aarch64; elsewhere it refuses too. `secrets.memory.guard=off` gives plain off-heap memory
 without any of the protection above and without native access; it is meant for tests.
