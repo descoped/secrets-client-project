@@ -230,7 +230,8 @@ public final class SecretMemory implements AutoCloseable {
     }
 
     /**
-     * Whether all memory mapped so far is locked in memory. Always {@code false} when not guarded.
+     * Whether all memory mapped so far is locked in memory. Always {@code false} when not guarded, and after
+     * {@link #close()}.
      *
      * @return whether it is locked
      */
@@ -240,8 +241,8 @@ public final class SecretMemory implements AutoCloseable {
 
     /**
      * Whether all memory mapped so far comes from {@code memfd_secret} (Linux 5.14 and later, where the kernel offers
-     * it): pages removed from the kernel's direct map. {@code false} on macOS, on older or restricted kernels, and when
-     * not guarded.
+     * it): pages removed from the kernel's direct map. {@code false} on macOS, on older or restricted kernels, when
+     * not guarded, and after {@link #close()}.
      *
      * @return whether it is hidden from the kernel
      */
@@ -382,14 +383,20 @@ public final class SecretMemory implements AutoCloseable {
             return slab;
         }
 
-        /** Says once per JVM whether Linux memory comes from {@code memfd_secret}. */
-        private static void logBacking(Slab slab) {
-            if (Native.platform() == Native.Platform.LINUX && BACKING_LOGGED.compareAndSet(false, true)) {
-                LOG.log(slab.hiddenFromKernel() ? System.Logger.Level.DEBUG : System.Logger.Level.INFO,
-                        slab.hiddenFromKernel()
-                                ? "Secret memory uses memfd_secret: removed from the kernel's direct map"
-                                : "memfd_secret is not available (kernel before 5.14, disabled, or blocked by"
-                                + " seccomp); secret memory uses anonymous pages");
+        /** Says once per JVM whether Linux memory comes from {@code memfd_secret}, and if not, why. */
+        private void logBacking(Slab slab) {
+            if (Native.platform() != Native.Platform.LINUX || !BACKING_LOGGED.compareAndSet(false, true)) {
+                return;
+            }
+            if (slab.hiddenFromKernel()) {
+                LOG.log(System.Logger.Level.DEBUG, "Secret memory uses memfd_secret: removed from the kernel's direct"
+                        + " map");
+            } else if (os.secretMemoryAvailable()) {
+                LOG.log(System.Logger.Level.INFO, "memfd_secret is available but could not be used (over the"
+                        + " locked-memory limit, or out of memory); secret memory uses anonymous pages");
+            } else {
+                LOG.log(System.Logger.Level.INFO, "memfd_secret is not available (kernel before 5.14, disabled, or"
+                        + " blocked by seccomp); secret memory uses anonymous pages");
             }
         }
 

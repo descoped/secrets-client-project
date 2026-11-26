@@ -43,8 +43,11 @@ public final class Native {
     /** {@code memfd_secret}, the same number on x86_64 and aarch64 (the generic syscall table). */
     private static final long SYS_MEMFD_SECRET = 447;
     /** {@code getrandom}: 318 on x86_64, 278 on aarch64. */
-    private static final long SYS_GETRANDOM =
-            System.getProperty("os.arch", "").equals("aarch64") ? 278 : 318;
+    private static final long SYS_GETRANDOM = "aarch64".equals(System.getProperty("os.arch")) ? 278 : 318;
+    /** {@code O_CLOEXEC}, the same on x86_64 and aarch64. */
+    private static final long O_CLOEXEC = 0x80000;
+    private static final int ENOSYS = 38;
+    private static final int EPERM = 1;
     private static final int EINTR = 4;
 
     /** The operating systems guarded memory supports. */
@@ -57,6 +60,7 @@ public final class Native {
         UNSUPPORTED
     }
 
+    private static final String OS_ARCH = "os.arch";
     private static final Platform PLATFORM = detect();
 
     private final MethodHandle mmap;
@@ -82,7 +86,7 @@ public final class Native {
     private Native() {
         if (PLATFORM == Platform.UNSUPPORTED) {
             throw new IllegalStateException("Guarded memory is not supported on " + System.getProperty("os.name")
-                    + " " + System.getProperty("os.arch"));
+                    + " " + System.getProperty(OS_ARCH));
         }
         Linker linker = Linker.nativeLinker();
         SymbolLookup libc = linker.defaultLookup();
@@ -101,7 +105,8 @@ public final class Native {
         munmap = downcall(linker, libc, "munmap", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG), captureErrno);
         madvise = downcall(linker, libc, "madvise", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT),
                 captureErrno);
-        syscall = downcall(linker, libc, "syscall", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_INT),
+        // syscall() reads every argument as a long, so they are passed as longs.
+        syscall = downcall(linker, libc, "syscall", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG),
                 captureErrno, Linker.Option.firstVariadicArg(1));
         ftruncate = downcall(linker, libc, "ftruncate", FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_LONG),
                 captureErrno);
@@ -110,7 +115,7 @@ public final class Native {
         // Linux 6.11 and later), which is exactly the fault populate() must not take.
         getrandom = PLATFORM == Platform.LINUX
                 ? downcall(linker, libc, "syscall",
-                FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_INT),
+                FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_LONG),
                 captureErrno, Linker.Option.firstVariadicArg(1))
                 : null;
         MethodHandle getpagesize = downcall(linker, libc, "getpagesize", FunctionDescriptor.of(JAVA_INT));
@@ -136,7 +141,7 @@ public final class Native {
 
     private static Platform detect() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
+        String arch = System.getProperty(OS_ARCH, "").toLowerCase(Locale.ROOT);
         boolean supportedArch = arch.equals("amd64") || arch.equals("x86_64") || arch.equals("aarch64");
         if (!supportedArch) {
             return Platform.UNSUPPORTED;
@@ -197,23 +202,28 @@ public final class Native {
 
     /**
      * Whether this kernel offers {@code memfd_secret} (Linux 5.14 and later, enabled by default since 6.5, and not
-     * blocked by a seccomp filter). Probed once.
+     * blocked by a seccomp filter). Probed until the answer is definite: {@code ENOSYS} or {@code EPERM} mean it is
+     * not offered; another error (out of file descriptors, say) says nothing and is not remembered.
      */
     public boolean secretMemoryAvailable() {
-        Boolean available = secretMemory;
-        if (available == null) {
-            available = false;
-            if (PLATFORM == Platform.LINUX) {
-                try {
-                    closeDescriptor(memfdSecret());
-                    available = true;
-                } catch (NativeException _) {
-                    // ENOSYS, or EPERM from a seccomp filter: not available.
-                }
-            }
-            secretMemory = available;
+        Boolean known = secretMemory;
+        if (known != null) {
+            return known;
         }
-        return available;
+        if (PLATFORM != Platform.LINUX) {
+            secretMemory = false;
+            return false;
+        }
+        try {
+            closeDescriptor(memfdSecret());
+            secretMemory = true;
+            return true;
+        } catch (NativeException e) {
+            if (e.errno() == ENOSYS || e.errno() == EPERM) {
+                secretMemory = false;
+            }
+            return false;
+        }
     }
 
     /**
@@ -258,7 +268,7 @@ public final class Native {
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment state = arena.allocate(captureLayout);
                 long n = (long) getrandom.invokeExact(state, SYS_GETRANDOM, MemorySegment.ofAddress(address + done),
-                        length - done, 0);
+                        length - done, 0L);
                 if (n < 0) {
                     int error = errno(state);
                     if (error != EINTR) {
@@ -290,7 +300,7 @@ public final class Native {
     private int memfdSecret() {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment state = arena.allocate(captureLayout);
-            long fd = (long) syscall.invokeExact(state, SYS_MEMFD_SECRET, 0);
+            long fd = (long) syscall.invokeExact(state, SYS_MEMFD_SECRET, O_CLOEXEC);
             if (fd < 0) {
                 throw new NativeException("memfd_secret", errno(state));
             }

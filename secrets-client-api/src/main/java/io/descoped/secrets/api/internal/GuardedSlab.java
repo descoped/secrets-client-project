@@ -80,8 +80,13 @@ public final class GuardedSlab extends Slab {
         try {
             os.mapSecret(address, length);
             return true;
-        } catch (NativeException _) {
-            os.reserveAt(address, length);
+        } catch (NativeException e) {
+            try {
+                os.reserveAt(address, length);
+            } catch (RuntimeException restore) {
+                restore.addSuppressed(e);
+                throw restore;
+            }
             return false;
         }
     }
