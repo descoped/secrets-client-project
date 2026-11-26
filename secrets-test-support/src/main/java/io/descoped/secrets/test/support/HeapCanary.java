@@ -47,13 +47,13 @@ public final class HeapCanary {
     private final Path dir;
     private final byte[] canary;
     private final Path file;
-    private final Duration timeout;
+    private final Duration limit;
 
-    private HeapCanary(Path dir, byte[] canary, Path file, Duration timeout) {
+    private HeapCanary(Path dir, byte[] canary, Path file, Duration limit) {
         this.dir = dir;
         this.canary = canary;
         this.file = file;
-        this.timeout = timeout;
+        this.limit = limit;
     }
 
     /**
@@ -129,9 +129,9 @@ public final class HeapCanary {
         // Output to a file, not a pipe: reading a pipe would block until the subject exits, and the timeout would
         // never apply.
         Process process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
-        if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+        if (!process.waitFor(limit.toMillis(), TimeUnit.MILLISECONDS)) {
             process.destroyForcibly().waitFor();
-            throw new AssertionError("The subject did not finish within " + timeout + ":\n"
+            throw new AssertionError("The subject did not finish within " + limit + ":\n"
                     + Files.readString(log, StandardCharsets.UTF_8));
         }
         String output = Files.readString(log, StandardCharsets.UTF_8);

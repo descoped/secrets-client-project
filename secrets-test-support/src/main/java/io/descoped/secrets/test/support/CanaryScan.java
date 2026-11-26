@@ -27,22 +27,21 @@ public final class CanaryScan {
 
     private static final long BASE = 1_000_003L;
 
-    /** A fragment and the encoding it comes from. Compared by identity: fragments are only ever looked up by hash. */
-    private static final class Pattern {
-        private final String encoding;
-        private final byte[] bytes;
-
-        Pattern(String encoding, byte[] bytes) {
-            this.encoding = encoding;
-            this.bytes = bytes;
+    /** A fragment and the encoding it comes from. */
+    private record Pattern(String encoding, byte[] bytes) {
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Pattern(String e, byte[] b) && encoding.equals(e) && Arrays.equals(bytes, b);
         }
 
-        String encoding() {
-            return encoding;
+        @Override
+        public int hashCode() {
+            return 31 * encoding.hashCode() + Arrays.hashCode(bytes);
         }
 
-        byte[] bytes() {
-            return bytes;
+        @Override
+        public String toString() {
+            return "Pattern[" + encoding + "]";
         }
     }
 

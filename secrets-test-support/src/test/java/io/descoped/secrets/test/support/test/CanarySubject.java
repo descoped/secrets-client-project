@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * The subject {@link CanaryHarnessTest} runs in a child JVM: {@code <canary file> <dump file> <mode>}. The guarded
@@ -33,7 +34,7 @@ public final class CanarySubject {
         Path dump = Path.of(args[1]);
         String mode = args[2];
         if (mode.equals("hang")) {
-            Thread.sleep(Long.MAX_VALUE);
+            new CountDownLatch(1).await();
         }
         if (mode.startsWith("leak-")) {
             ByteBuffer value = readDirect(file);
