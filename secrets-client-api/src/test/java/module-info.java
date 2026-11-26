@@ -5,6 +5,8 @@
 open module io.descoped.secrets.api.test {
     requires io.descoped.secrets.api;
     requires org.junit.jupiter.api;
+    requires org.junit.jupiter.params;
+    requires java.logging;
 
     provides io.descoped.secrets.api.SecretManagerClientInitializer with
             io.descoped.secrets.api.test.MemoryClientInitializer;

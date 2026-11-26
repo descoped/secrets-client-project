@@ -7,6 +7,13 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 4.0 keeps secrets off the Java heap; it is built in steps, and this section grows with them.
 
+### Added
+
+- `SecretMemory` and `Secret`: secret values in guarded off-heap memory (Foreign Function & Memory API), with guard
+  pages, `mlock`, no access outside a callback, and on Linux no core dumps and zeroing in a forked child. Needs
+  `--enable-native-access=io.descoped.secrets.api`. Configuration `secrets.memory.guard` and `secrets.memory.lock`.
+  The clients do not use it yet.
+
 ### Changed
 
 - Java 25 or later (was 17).
