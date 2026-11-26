@@ -159,9 +159,8 @@ public interface SecretManagerClient extends AutoCloseable {
      * Reads a version of a secret into guarded memory. The secret is the caller's: close it when it is no longer
      * needed. Closing the client closes it too.
      *
-     * <p>A provider built on guarded memory never puts the value on the Java heap on the way: safe-configuration
-     * does. A provider not rebuilt yet (Google Secret Manager, dynamic-configuration) reads it as
-     * {@link #readBytes(String, String)} does and copies it into guarded memory, wiping its own array.
+     * <p>A provider built on guarded memory never puts the value on the Java heap on the way: safe-configuration and
+     * Google Secret Manager do. dynamic-configuration, whose values are strings, copies it into guarded memory.
      *
      * @param secretName    the name of the secret
      * @param secretVersion the version to read, or {@code null} for the latest
@@ -193,7 +192,7 @@ public interface SecretManagerClient extends AutoCloseable {
      * copies the value; the caller still owns {@code secretValue} and closes it.
      *
      * <p>A provider built on guarded memory never puts the value on the Java heap on the way: safe-configuration
-     * does. This default, for providers not rebuilt yet, hands a heap copy to
+     * and Google Secret Manager do. This default, for other providers, hands a heap copy to
      * {@link #addVersion(String, byte[])} and wipes it when that returns.
      *
      * @param secretName  the name of the secret

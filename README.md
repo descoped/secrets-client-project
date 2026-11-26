@@ -36,7 +36,7 @@ One Maven reactor; every module shares the version of the root POM.
 secrets-client-api/                        the API and the provider service
 secrets-provider-safe-configuration/       provider: a local key=value file, for development and tests
 secrets-provider-dynamic-configuration/    provider: dynamic-configuration, read-only
-secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST, google-auth)
+secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST, no dependencies)
 secrets-client-bom/                        BOM of the modules above
 secrets-test-support/                      test support: the canary heap-dump harness (never published)
 src/it/consumer/                           JPMS smoke test: an application using every provider

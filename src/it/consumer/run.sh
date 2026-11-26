@@ -2,8 +2,7 @@
 # JPMS consumer smoke test. Builds the jars and copies the runtime dependencies, then runs an application module
 # that requires only io.descoped.secrets.api (no provider module, no `uses`) against every provider:
 #
-# - on the module path, where the API module's `uses` and service binding resolve the provider modules, with
-#   google-auth and its dependencies as automatic modules;
+# - on the module path, where the API module's `uses` and service binding resolve the provider modules;
 # - on the class path, where META-INF/services registers the providers.
 #
 # It also prints each module descriptor and checks with jdeps that the modules with only named dependencies declare
@@ -40,7 +39,7 @@ done
 
 echo "== jdeps: requires that are missing or unused"
 jdeps --multi-release "$release" --module-path "$out/lib" --check \
-    io.descoped.secrets.api,io.descoped.secrets.provider.safe,io.descoped.secrets.provider.dynamic
+    io.descoped.secrets.api,io.descoped.secrets.provider.safe,io.descoped.secrets.provider.dynamic,io.descoped.secrets.provider.google
 
 # Guarded memory (safe-configuration, and every provider's read) needs native access for the API module.
 echo "== module path"

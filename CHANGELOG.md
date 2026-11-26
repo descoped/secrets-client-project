@@ -16,8 +16,14 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - `SecretManagerClient.read(name)`/`read(name, version)` return a `Secret`, and `addVersion(name, Secret)` writes
   one. Closing the client closes the secrets it returned.
 - safe-configuration reads, parses, holds and writes in guarded memory: no value is on the Java heap unless the caller
-  asks for a heap copy, proven by a canary heap-dump test. Google Secret Manager and dynamic-configuration copy into
-  guarded memory for `read` for now.
+  asks for a heap copy, proven by a canary heap-dump test. dynamic-configuration copies into guarded memory for
+  `read`.
+- Google Secret Manager on guarded memory, with its own HTTP/1.1 client (`SocketChannel`, `SSLEngine`), JSON reader
+  and Base64: values, the access token and the refresh token are never on the Java heap (proven over plain HTTP by a
+  canary test; TLS is verified next). Credentials: an `authorized_user` file (`gcloud auth application-default
+  login`), `GOOGLE_APPLICATION_CREDENTIALS`, gcloud's file, or the metadata server; `secrets.credentials=metadata`
+  for the metadata server only. New keys `secrets.credentials`, `secrets.credentials-path`, `secrets.token-endpoint`,
+  `secrets.metadata-endpoint`.
 
 ### Changed
 
@@ -27,7 +33,17 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path) unless
   `secrets.memory.guard=off`. `read` needs it with every provider.
 - safe-configuration is for local development and tests, not for production.
+- Google Secret Manager: service-account keys are refused, and `secrets.service-account-key-path` is an error (signing
+  with a key would put it on the Java heap); use the metadata server, or an `authorized_user` file for development.
+  The provider needs native access to start.
+- Google Secret Manager: `secrets.connect-timeout` and `secrets.request-timeout` include the host name lookup and are
+  at most one hour.
 - Closing a client inside a callback of a secret it returned throws `IllegalStateException`; a later `close()` wipes.
+
+### Removed
+
+- google-auth (with google-http-client, Guava, Gson) and Jackson from the Google provider: it depends on the API
+  module only.
 
 ## [3.0.0] - 2026-11-17
 

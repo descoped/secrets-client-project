@@ -12,7 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Against the real Google Secret Manager, only when {@code SECRETS_GOOGLE_TEST_PROJECT} names a project. Credentials
- * are Application Default Credentials, or the key file in {@code SECRETS_GOOGLE_TEST_KEY_PATH}. It adds versions to
+ * are Application Default Credentials ({@code gcloud auth application-default login}), or the authorized_user file in
+ * {@code SECRETS_GOOGLE_TEST_CREDENTIALS_PATH}. It adds versions to
  * the secret {@code secrets-client-live-test}, creating it with automatic replication if needed. Not run in CI.
  */
 @EnabledIfEnvironmentVariable(named = "SECRETS_GOOGLE_TEST_PROJECT", matches = ".+")
@@ -23,9 +24,9 @@ class GoogleSecretManagerLiveTest {
         Map<String, String> configuration = new HashMap<>(Map.of(
                 "secrets.provider", "google-secret-manager",
                 "secrets.project-id", System.getenv("SECRETS_GOOGLE_TEST_PROJECT")));
-        String keyPath = System.getenv("SECRETS_GOOGLE_TEST_KEY_PATH");
-        if (keyPath != null) {
-            configuration.put("secrets.service-account-key-path", keyPath);
+        String credentialsPath = System.getenv("SECRETS_GOOGLE_TEST_CREDENTIALS_PATH");
+        if (credentialsPath != null) {
+            configuration.put("secrets.credentials-path", credentialsPath);
         }
         String first = UUID.randomUUID().toString();
         String second = UUID.randomUUID().toString();

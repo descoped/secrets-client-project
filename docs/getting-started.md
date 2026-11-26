@@ -34,7 +34,7 @@ the providers you use at runtime:
 Gradle: `implementation(platform("io.descoped.secrets:secrets-client-bom:3.0.0"))`, then the modules without a
 version.
 
-The BOM manages the secrets modules only. Third-party versions (google-auth, Jackson, dynamic-configuration) come
+The BOM manages the secrets modules only. Third-party versions (dynamic-configuration) come
 through the modules' own dependencies.
 
 Releases are on Maven Central. **No SNAPSHOT goes to Maven Central.** SNAPSHOTs of `master`, and of a branch when
@@ -93,7 +93,7 @@ Provider | Reads | Writes | Holds values as | Use it for
 ---|---|---|---|---
 `safe-configuration` | a local `key=value` file | yes, atomically, owner-only | guarded memory | local development and tests
 `dynamic-configuration` | a properties file, a secret directory, inline values | no | strings | tests, migration from property files
-`google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | bytes, wiped | production on Google Cloud
+`google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | guarded memory | production on Google Cloud
 
 Every provider follows the same contract, so switching is a configuration change; see
 [The API](api.md#the-contract).
