@@ -42,9 +42,7 @@ public final class Native {
     private static final int MAP_FIXED = 0x10;
     /** {@code memfd_secret}, the same number on x86_64 and aarch64 (the generic syscall table). */
     private static final long SYS_MEMFD_SECRET = 447;
-    private static final int EAGAIN_LINUX = 11;
-    private static final int ENOMEM = 12;
-    private static final int EPERM = 1;
+    private static final int EINTR = 4;
 
     /** The operating systems guarded memory supports. */
     public enum Platform {
@@ -67,6 +65,8 @@ public final class Native {
     private final MethodHandle syscall;
     private final MethodHandle ftruncate;
     private final MethodHandle close;
+    /** Linux only: macOS has no getrandom. */
+    private final MethodHandle getrandom;
     private volatile Boolean secretMemory;
     private final StructLayout captureLayout;
     private final VarHandle errno;
@@ -103,6 +103,10 @@ public final class Native {
         ftruncate = downcall(linker, libc, "ftruncate", FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_LONG),
                 captureErrno);
         close = downcall(linker, libc, "close", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        getrandom = PLATFORM == Platform.LINUX
+                ? downcall(linker, libc, "getrandom", FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_INT),
+                captureErrno)
+                : null;
         MethodHandle getpagesize = downcall(linker, libc, "getpagesize", FunctionDescriptor.of(JAVA_INT));
         try {
             pageSize = (int) getpagesize.invokeExact();
@@ -207,12 +211,14 @@ public final class Native {
     }
 
     /**
-     * Maps {@code memfd_secret} memory, readable and writable, over {@code [address, address + length)}, replacing
-     * what is there. Its pages are removed from the kernel's direct map, locked, and not in core dumps. Linux only;
-     * check {@link #secretMemoryAvailable()} first.
+     * Maps {@code memfd_secret} memory, readable and writable and zeroed, over {@code [address, address + length)},
+     * replacing what is there. Its pages are removed from the kernel's direct map, locked, and not in core dumps.
+     * Every page is faulted in here, by the kernel, so that a page the kernel cannot provide (some kernels accept the
+     * mapping over the locked-memory limit and refuse the pages later) is an error here rather than a fault in Java.
+     * Linux only; check {@link #secretMemoryAvailable()} first.
      *
-     * @throws NativeException if it cannot be created or mapped; over the locked-memory limit the mapping fails
-     *                         ({@link #isOverLimit(NativeException)})
+     * @throws NativeException if it cannot be created, mapped or faulted in; the range is then in an unknown state
+     *                         and must be mapped again ({@link #reserveAt(long, long)})
      */
     public void mapSecret(long address, long length) {
         int fd = memfdSecret();
@@ -232,15 +238,34 @@ public final class Native {
         } finally {
             closeDescriptor(fd);
         }
+        populate(address, length);
+        MemorySegment.ofAddress(address).reinterpret(length).fill((byte) 0);
     }
 
     /**
-     * Whether {@code e} says the process is over its locked-memory limit: {@code EAGAIN} or {@code ENOMEM}, or
-     * {@code EPERM} when the limit is zero.
+     * Faults in {@code [address, address + length)} through the kernel: {@code getrandom} writes into it, and returns
+     * {@code EFAULT} for a page it cannot get, where a write from Java would fault.
      */
-    public static boolean isOverLimit(NativeException e) {
-        int eagain = PLATFORM == Platform.MACOS ? 35 : EAGAIN_LINUX;
-        return e.errno() == eagain || e.errno() == ENOMEM || e.errno() == EPERM;
+    private void populate(long address, long length) {
+        long done = 0;
+        while (done < length) {
+            try (Arena arena = Arena.ofConfined()) {
+                MemorySegment state = arena.allocate(captureLayout);
+                long n = (long) getrandom.invokeExact(state, MemorySegment.ofAddress(address + done), length - done, 0);
+                if (n < 0) {
+                    int error = errno(state);
+                    if (error != EINTR) {
+                        throw new NativeException("getrandom(memfd_secret)", error);
+                    }
+                } else {
+                    done += n;
+                }
+            } catch (NativeException e) {
+                throw e;
+            } catch (Throwable e) {
+                throw new IllegalStateException("getrandom failed", e);
+            }
+        }
     }
 
     /**

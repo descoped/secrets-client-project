@@ -41,7 +41,7 @@ public final class GuardedSlab extends Slab {
         boolean isHidden = false;
         try {
             if (os.secretMemoryAvailable()) {
-                isHidden = hide(os, dataAddress, length, lockRequired);
+                isHidden = hide(os, dataAddress, length);
             }
             if (!isHidden) {
                 os.protect(dataAddress, length, Native.PROT_READ_WRITE);
@@ -71,19 +71,17 @@ public final class GuardedSlab extends Slab {
     }
 
     /**
-     * Replaces the data pages with {@code memfd_secret} memory, removed from the kernel's direct map. If that fails,
-     * puts the reserved anonymous pages back and returns {@code false}, unless the failure is the locked-memory limit
-     * and locking is required ({@code memfd_secret} memory is always locked).
+     * Replaces the data pages with {@code memfd_secret} memory, removed from the kernel's direct map. If that fails
+     * for any reason, puts the reserved anonymous pages back and returns {@code false}: the slab then uses anonymous
+     * pages, and {@code mlock} on them applies the locking policy (over the locked-memory limit, {@code memfd_secret}
+     * fails too).
      */
-    private static boolean hide(Native os, long address, long length, boolean lockRequired) {
+    private static boolean hide(Native os, long address, long length) {
         try {
             os.mapSecret(address, length);
             return true;
-        } catch (NativeException e) {
+        } catch (NativeException _) {
             os.reserveAt(address, length);
-            if (lockRequired && Native.isOverLimit(e)) {
-                throw e;
-            }
             return false;
         }
     }

@@ -365,9 +365,7 @@ public final class SecretMemory implements AutoCloseable {
                 try {
                     slab = new GuardedSlab(os, Math.max(os.pageSize(), size), lockRequired);
                 } catch (NativeException e) {
-                    boolean overLimit = e.call().equals("mlock")
-                            || e.call().equals("mmap(memfd_secret)") && Native.isOverLimit(e);
-                    throw new SecretManagerException(overLimit
+                    throw new SecretManagerException(e.call().equals("mlock")
                             ? "Cannot lock secret memory (" + e.getMessage() + "): the process is over its"
                             + " locked-memory limit (RLIMIT_MEMLOCK). Raise it (ulimit -l, docker run --ulimit"
                             + " memlock=...), or set " + LOCK_KEY + "=preferred to use it unlocked"
