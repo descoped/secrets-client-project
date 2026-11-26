@@ -5,7 +5,7 @@
 
 A Java library for reading and writing secrets through one API, with the backend chosen by configuration: a local
 file, dynamic-configuration, or Google Secret Manager. Values are handled as bytes and wiped when no longer needed,
-and never appear in exception messages. Java 17 or later, on the module path or the class path.
+and never appear in exception messages. Java 25 or later, on the module path or the class path.
 
 **[Documentation](docs/README.md)**: getting started, the API, each provider, and migrating from 2.x.
 
@@ -42,7 +42,7 @@ src/it/consumer/                           JPMS smoke test: an application using
 docs/                                      user documentation
 ```
 
-Requires JDK 17 or later; the Maven Wrapper brings Maven.
+Requires JDK 25 or later; the Maven Wrapper brings Maven.
 
 ```sh
 ./mvnw verify                    # compile with -Xlint:all -Werror, run the tests (JUnit 6)

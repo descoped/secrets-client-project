@@ -26,8 +26,9 @@ change to the API or to a provider's documented behaviour needs a new major vers
 
 ## Invariants (never violate)
 
-- **Java 17 baseline** (`maven.compiler.release` 17): every class file is Java 17 whatever JDK builds it. CI builds
-  and tests on JDK 17 only (`ci.yml`). Nothing above Java 17 in main or test code.
+- **Java 25 baseline** (`java.version` 25 in the root POM, the same number in `.java-version`): every class file is
+  Java 25 whatever JDK builds it. CI and the Claude workflow set up the JDK from `.java-version`, and the JPMS smoke
+  test compiles with it. Change the baseline in both files together.
 - **One reactor, one version.** Every module inherits the root POM and is released with it; modules depend on each
   other with `${project.version}`. Dependency versions are properties in the root POM, not `dependencyManagement`, so
   the BOM manages the secrets modules only.
@@ -37,6 +38,11 @@ change to the API or to a provider's documented behaviour needs a new major vers
 - **Secrets stay secret.** Secret values are never logged, never put in exception messages, `toString` or test
   output. Byte and char arrays handed to or returned by a client are copies; the client wipes its own copies when it
   no longer needs them and on `close()`.
+- **No secret on the Java heap (4.0, being built).** Library code keeps secret values, and credentials that grant
+  access to secrets (access and refresh tokens), only in guarded native memory (FFM, `java.lang.foreign`): never in a
+  heap array, a `String` or a heap `ByteBuffer`, except the hand-over copy a caller asks for, wiped when its callback
+  returns. No runtime dependency that holds them on the heap. A canary heap-dump test proves each read and write path.
+  Code from 3.x does not meet this yet; new code must.
 - **One contract for every provider.** A missing secret, a closed client and a write the provider cannot do are
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and

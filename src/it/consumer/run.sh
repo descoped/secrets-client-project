@@ -14,6 +14,8 @@ root=$(cd "$(dirname "$0")/../../.." && pwd)
 it="$root/src/it/consumer"
 out="$root/target/it-consumer"
 cd "$root"
+# The baseline release, as CI and the POM use it.
+release=$(cat .java-version)
 
 rm -rf "$out"
 mkdir -p "$out/lib" "$out/classes"
@@ -27,7 +29,7 @@ for module in secrets-client-api secrets-provider-safe-configuration secrets-pro
     cp "$module/target/$module-$version.jar" "$out/lib/"
 done
 
-javac --release 17 -Xlint:all -Werror --module-path "$out/lib" --module-source-path "$it/src" \
+javac --release "$release" -Xlint:all -Werror --module-path "$out/lib" --module-source-path "$it/src" \
     -d "$out/classes" $(find "$it/src" -name '*.java')
 
 echo "== module descriptors"
@@ -37,7 +39,7 @@ for module in secrets-client-api secrets-provider-safe-configuration secrets-pro
 done
 
 echo "== jdeps: requires that are missing or unused"
-jdeps --multi-release 17 --module-path "$out/lib" --check \
+jdeps --multi-release "$release" --module-path "$out/lib" --check \
     io.descoped.secrets.api,io.descoped.secrets.provider.safe,io.descoped.secrets.provider.dynamic
 
 echo "== module path"

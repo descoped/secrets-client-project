@@ -3,6 +3,14 @@
 All notable changes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/). All modules share one version.
 
+## [Unreleased]
+
+4.0 keeps secrets off the Java heap; it is built in steps, and this section grows with them.
+
+### Changed
+
+- Java 25 or later (was 17).
+
 ## [3.0.0] - 2026-11-17
 
 A breaking release: the four module repositories are now one, and every module is revised. The Maven coordinates
