@@ -298,6 +298,50 @@ class SecretMemoryTest {
         }
     }
 
+    /**
+     * Allocates and frees secrets of mixed sizes in a seeded random order, so that the slabs' free lists fragment, and
+     * checks after every step that no secret shares memory with another: each holds a byte of its own, and still
+     * does. Once caught {@code Slab.allocate} reading a free range's length from a TreeMap entry after removing it,
+     * when the entry already described another range.
+     */
+    @Test
+    void secretsNeverOverlapHoweverTheFreeSpaceFragments() {
+        java.util.Random random = new java.util.Random(42);
+        List<Secret> live = new ArrayList<>();
+        List<Byte> marks = new ArrayList<>();
+        try {
+            for (int step = 0; step < 4000; step++) {
+                if (!live.isEmpty() && random.nextInt(5) < 2) {
+                    int victim = random.nextInt(live.size());
+                    live.remove(victim).close();
+                    marks.remove(victim);
+                } else {
+                    byte mark = (byte) (1 + step % 250);
+                    int length = random.nextInt(4) == 0 ? 1 + random.nextInt(3000) : 1 + random.nextInt(200);
+                    live.add(memory.allocate(length, segment -> segment.fill(mark)));
+                    marks.add(mark);
+                }
+                if (step % 20 == 0) {
+                    for (int i = 0; i < live.size(); i++) {
+                        byte mark = marks.get(i);
+                        boolean intact = live.get(i).withSegment(segment -> {
+                            for (long k = 0; k < segment.byteSize(); k++) {
+                                if (segment.get(ValueLayout.JAVA_BYTE, k) != mark) {
+                                    return false;
+                                }
+                            }
+                            return true;
+                        });
+                        assertTrue(intact, "secret " + i + " of " + live.size() + " at step " + step
+                                + " was overwritten");
+                    }
+                }
+            }
+        } finally {
+            live.forEach(Secret::close);
+        }
+    }
+
     @Test
     void concurrentReadersAndClose() throws Exception {
         Secret secret = memory.fromBytes(bytes("s3cret"));

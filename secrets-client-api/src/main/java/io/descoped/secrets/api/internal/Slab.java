@@ -68,11 +68,14 @@ public abstract sealed class Slab permits GuardedSlab, PlainSlab {
         lock.lock();
         try {
             for (Map.Entry<Long, Long> range : free.entrySet()) {
-                if (range.getValue() >= size) {
-                    long offset = range.getKey();
+                // Read both before the removal: TreeMap reuses a removed node for its successor's key and value, so
+                // the entry would describe another range afterwards.
+                long offset = range.getKey();
+                long length = range.getValue();
+                if (length >= size) {
                     free.remove(offset);
-                    if (range.getValue() > size) {
-                        free.put(offset + size, range.getValue() - size);
+                    if (length > size) {
+                        free.put(offset + size, length - size);
                     }
                     used += size;
                     return offset;
