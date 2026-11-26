@@ -25,6 +25,8 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
 @SuppressWarnings("restricted")
 public final class Native {
 
+    private static final String OS_ARCH = "os.arch";
+
     /** No access: guard pages, and data pages while nobody reads them. */
     public static final int PROT_NONE = 0;
     /** Read only: data pages while a secret on them is read. */
@@ -43,7 +45,7 @@ public final class Native {
     /** {@code memfd_secret}, the same number on x86_64 and aarch64 (the generic syscall table). */
     private static final long SYS_MEMFD_SECRET = 447;
     /** {@code getrandom}: 318 on x86_64, 278 on aarch64. */
-    private static final long SYS_GETRANDOM = "aarch64".equals(System.getProperty("os.arch")) ? 278 : 318;
+    private static final long SYS_GETRANDOM = "aarch64".equals(System.getProperty(OS_ARCH)) ? 278 : 318;
     /** {@code O_CLOEXEC}, the same on x86_64 and aarch64. */
     private static final long O_CLOEXEC = 0x80000;
     private static final int ENOSYS = 38;
@@ -60,7 +62,6 @@ public final class Native {
         UNSUPPORTED
     }
 
-    private static final String OS_ARCH = "os.arch";
     private static final Platform PLATFORM = detect();
 
     private final MethodHandle mmap;
@@ -110,7 +111,7 @@ public final class Native {
                 captureErrno, Linker.Option.firstVariadicArg(1));
         ftruncate = downcall(linker, libc, "ftruncate", FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_LONG),
                 captureErrno);
-        close = downcall(linker, libc, "close", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        close = downcall(linker, libc, "close", FunctionDescriptor.of(JAVA_INT, JAVA_INT), captureErrno);
         // Through syscall(), not glibc's getrandom(): that may fill the buffer from user space (the vDSO getrandom,
         // Linux 6.11 and later), which is exactly the fault populate() must not take.
         getrandom = PLATFORM == Platform.LINUX
@@ -174,20 +175,8 @@ public final class Native {
      * @throws NativeException if {@code mmap} fails
      */
     public long reserve(long length) {
-        int anonymous = PLATFORM == Platform.LINUX ? MAP_ANONYMOUS_LINUX : MAP_ANONYMOUS_MACOS;
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment state = arena.allocate(captureLayout);
-            MemorySegment result = (MemorySegment) mmap.invokeExact(state, MemorySegment.NULL, length, PROT_NONE,
-                    MAP_PRIVATE | anonymous, -1, 0L);
-            if (result.address() == -1L) {
-                throw new NativeException("mmap", errno(state));
-            }
-            return result.address();
-        } catch (NativeException e) {
-            throw e;
-        } catch (Throwable e) {
-            throw new IllegalStateException("mmap failed", e);
-        }
+        return invoke("mmap", state -> ((MemorySegment) mmap.invokeExact(state, MemorySegment.NULL, length, PROT_NONE,
+                MAP_PRIVATE | anonymous(), -1, 0L)).address());
     }
 
     /**
@@ -196,8 +185,11 @@ public final class Native {
      * @throws NativeException if {@code mmap} fails
      */
     public void reserveAt(long address, long length) {
-        int anonymous = PLATFORM == Platform.LINUX ? MAP_ANONYMOUS_LINUX : MAP_ANONYMOUS_MACOS;
-        mapFixed("mmap", address, length, PROT_NONE, MAP_PRIVATE | anonymous | MAP_FIXED, -1);
+        mapFixed("mmap", address, length, PROT_NONE, MAP_PRIVATE | anonymous() | MAP_FIXED, -1);
+    }
+
+    private static int anonymous() {
+        return PLATFORM == Platform.LINUX ? MAP_ANONYMOUS_LINUX : MAP_ANONYMOUS_MACOS;
     }
 
     /**
@@ -239,17 +231,7 @@ public final class Native {
     public void mapSecret(long address, long length) {
         int fd = memfdSecret();
         try {
-            try (Arena arena = Arena.ofConfined()) {
-                MemorySegment state = arena.allocate(captureLayout);
-                int result = (int) ftruncate.invokeExact(state, fd, length);
-                if (result != 0) {
-                    throw new NativeException("ftruncate(memfd_secret)", errno(state));
-                }
-            } catch (NativeException e) {
-                throw e;
-            } catch (Throwable e) {
-                throw new IllegalStateException("ftruncate failed", e);
-            }
+            invoke("ftruncate(memfd_secret)", state -> (int) ftruncate.invokeExact(state, fd, length));
             mapFixed("mmap(memfd_secret)", address, length, PROT_READ_WRITE, MAP_SHARED | MAP_FIXED, fd);
         } finally {
             closeDescriptor(fd);
@@ -265,22 +247,14 @@ public final class Native {
     private void populate(long address, long length) {
         long done = 0;
         while (done < length) {
-            try (Arena arena = Arena.ofConfined()) {
-                MemorySegment state = arena.allocate(captureLayout);
-                long n = (long) getrandom.invokeExact(state, SYS_GETRANDOM, MemorySegment.ofAddress(address + done),
-                        length - done, 0L);
-                if (n < 0) {
-                    int error = errno(state);
-                    if (error != EINTR) {
-                        throw new NativeException("getrandom(memfd_secret)", error);
-                    }
-                } else {
-                    done += n;
-                }
+            long from = done;
+            try {
+                done += invoke("getrandom(memfd_secret)", state -> (long) getrandom.invokeExact(state, SYS_GETRANDOM,
+                        MemorySegment.ofAddress(address + from), length - from, 0L));
             } catch (NativeException e) {
-                throw e;
-            } catch (Throwable e) {
-                throw new IllegalStateException("getrandom failed", e);
+                if (e.errno() != EINTR) {
+                    throw e;
+                }
             }
         }
     }
@@ -293,49 +267,28 @@ public final class Native {
      */
     public void dontFork(long address, long length) {
         if (PLATFORM == Platform.LINUX) {
-            call("madvise(MADV_DONTFORK)", madvise, address, length, MADV_DONTFORK);
+            advise("madvise(MADV_DONTFORK)", address, length, MADV_DONTFORK);
         }
     }
 
     private int memfdSecret() {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment state = arena.allocate(captureLayout);
-            long fd = (long) syscall.invokeExact(state, SYS_MEMFD_SECRET, O_CLOEXEC);
-            if (fd < 0) {
-                throw new NativeException("memfd_secret", errno(state));
-            }
-            return (int) fd;
-        } catch (NativeException e) {
-            throw e;
-        } catch (Throwable e) {
-            throw new IllegalStateException("memfd_secret failed", e);
-        }
+        return (int) invoke("memfd_secret", state -> (long) syscall.invokeExact(state, SYS_MEMFD_SECRET, O_CLOEXEC));
     }
 
-    /** Closes {@code fd}; returns whether that worked (a mapping stays valid after its descriptor is closed). */
-    private boolean closeDescriptor(int fd) {
+    /** Closes {@code fd}. A mapping stays valid after its descriptor is closed, so a failure changes nothing. */
+    private void closeDescriptor(int fd) {
         try {
-            return (int) close.invokeExact(fd) == 0;
-        } catch (Throwable e) {
-            throw new IllegalStateException("close failed", e);
+            invoke("close", state -> (int) close.invokeExact(state, fd));
+        } catch (NativeException _) {
+            // See above.
         }
     }
 
     private void mapFixed(String name, long address, long length, int protection, int flags, int fd) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment state = arena.allocate(captureLayout);
-            MemorySegment result = (MemorySegment) mmap.invokeExact(state, MemorySegment.ofAddress(address), length,
-                    protection, flags, fd, 0L);
-            if (result.address() == -1L) {
-                throw new NativeException(name, errno(state));
-            }
-            if (result.address() != address) {
-                throw new IllegalStateException(name + " mapped at another address");
-            }
-        } catch (NativeException e) {
-            throw e;
-        } catch (Throwable e) {
-            throw new IllegalStateException(name + " failed", e);
+        long mapped = invoke(name, state -> ((MemorySegment) mmap.invokeExact(state, MemorySegment.ofAddress(address),
+                length, protection, flags, fd, 0L)).address());
+        if (mapped != address) {
+            throw new IllegalStateException(name + " mapped at another address");
         }
     }
 
@@ -345,7 +298,8 @@ public final class Native {
      * @throws NativeException if {@code mprotect} fails
      */
     public void protect(long address, long length, int protection) {
-        call("mprotect", mprotect, address, length, protection);
+        invoke("mprotect", state -> (int) mprotect.invokeExact(state, MemorySegment.ofAddress(address), length,
+                protection));
     }
 
     /**
@@ -354,7 +308,7 @@ public final class Native {
      * @throws NativeException if {@code mlock} fails, typically over the locked-memory limit ({@code RLIMIT_MEMLOCK})
      */
     public void lock(long address, long length) {
-        call("mlock", mlock, address, length);
+        invoke("mlock", state -> (int) mlock.invokeExact(state, MemorySegment.ofAddress(address), length));
     }
 
     /**
@@ -363,7 +317,7 @@ public final class Native {
      * @throws NativeException if {@code munlock} fails
      */
     public void unlock(long address, long length) {
-        call("munlock", munlock, address, length);
+        invoke("munlock", state -> (int) munlock.invokeExact(state, MemorySegment.ofAddress(address), length));
     }
 
     /**
@@ -372,7 +326,7 @@ public final class Native {
      * @throws NativeException if {@code munmap} fails
      */
     public void unmap(long address, long length) {
-        call("munmap", munmap, address, length);
+        invoke("munmap", state -> (int) munmap.invokeExact(state, MemorySegment.ofAddress(address), length));
     }
 
     /**
@@ -386,7 +340,7 @@ public final class Native {
         if (PLATFORM != Platform.LINUX) {
             return false;
         }
-        call("madvise(MADV_DONTDUMP)", madvise, address, length, MADV_DONTDUMP);
+        advise("madvise(MADV_DONTDUMP)", address, length, MADV_DONTDUMP);
         return true;
     }
 
@@ -398,39 +352,41 @@ public final class Native {
      */
     public void wipeOnFork(long address, long length) {
         if (PLATFORM == Platform.LINUX) {
-            call("madvise(MADV_WIPEONFORK)", madvise, address, length, MADV_WIPEONFORK);
+            advise("madvise(MADV_WIPEONFORK)", address, length, MADV_WIPEONFORK);
         }
     }
 
-    private void call(String name, MethodHandle handle, long address, long length) {
+    private void advise(String name, long address, long length, int advice) {
+        invoke(name, state -> (int) madvise.invokeExact(state, MemorySegment.ofAddress(address), length, advice));
+    }
+
+    /** One downcall with {@code errno} captured in {@code state}. Returns the C result, widened to a long. */
+    @FunctionalInterface
+    private interface Downcall {
+        long invoke(MemorySegment state) throws Throwable;
+    }
+
+    /**
+     * Makes a downcall. A result of -1 ({@code MAP_FAILED} for {@code mmap}) is a failure, reported with the
+     * {@code errno} the call left.
+     *
+     * @return the result
+     * @throws NativeException if the call returns -1
+     */
+    private long invoke(String name, Downcall downcall) {
+        long result;
+        int error;
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment state = arena.allocate(captureLayout);
-            int result = (int) handle.invokeExact(state, MemorySegment.ofAddress(address), length);
-            if (result != 0) {
-                throw new NativeException(name, errno(state));
-            }
-        } catch (NativeException e) {
-            throw e;
+            result = downcall.invoke(state);
+            error = (int) errno.get(state, 0L);
         } catch (Throwable e) {
+            // invokeExact declares Throwable; a downcall itself throws nothing.
             throw new IllegalStateException(name + " failed", e);
         }
-    }
-
-    private void call(String name, MethodHandle handle, long address, long length, int flag) {
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment state = arena.allocate(captureLayout);
-            int result = (int) handle.invokeExact(state, MemorySegment.ofAddress(address), length, flag);
-            if (result != 0) {
-                throw new NativeException(name, errno(state));
-            }
-        } catch (NativeException e) {
-            throw e;
-        } catch (Throwable e) {
-            throw new IllegalStateException(name + " failed", e);
+        if (result == -1L) {
+            throw new NativeException(name, error);
         }
-    }
-
-    private int errno(MemorySegment state) {
-        return (int) errno.get(state, 0L);
+        return result;
     }
 }
