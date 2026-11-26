@@ -42,6 +42,9 @@ public final class Native {
     private static final int MAP_FIXED = 0x10;
     /** {@code memfd_secret}, the same number on x86_64 and aarch64 (the generic syscall table). */
     private static final long SYS_MEMFD_SECRET = 447;
+    /** {@code getrandom}: 318 on x86_64, 278 on aarch64. */
+    private static final long SYS_GETRANDOM =
+            System.getProperty("os.arch", "").equals("aarch64") ? 278 : 318;
     private static final int EINTR = 4;
 
     /** The operating systems guarded memory supports. */
@@ -65,7 +68,7 @@ public final class Native {
     private final MethodHandle syscall;
     private final MethodHandle ftruncate;
     private final MethodHandle close;
-    /** Linux only: macOS has no getrandom. */
+    /** The getrandom syscall, Linux only. */
     private final MethodHandle getrandom;
     private volatile Boolean secretMemory;
     private final StructLayout captureLayout;
@@ -103,9 +106,12 @@ public final class Native {
         ftruncate = downcall(linker, libc, "ftruncate", FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_LONG),
                 captureErrno);
         close = downcall(linker, libc, "close", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        // Through syscall(), not glibc's getrandom(): that may fill the buffer from user space (the vDSO getrandom,
+        // Linux 6.11 and later), which is exactly the fault populate() must not take.
         getrandom = PLATFORM == Platform.LINUX
-                ? downcall(linker, libc, "getrandom", FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_INT),
-                captureErrno)
+                ? downcall(linker, libc, "syscall",
+                FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_INT),
+                captureErrno, Linker.Option.firstVariadicArg(1))
                 : null;
         MethodHandle getpagesize = downcall(linker, libc, "getpagesize", FunctionDescriptor.of(JAVA_INT));
         try {
@@ -243,15 +249,16 @@ public final class Native {
     }
 
     /**
-     * Faults in {@code [address, address + length)} through the kernel: {@code getrandom} writes into it, and returns
-     * {@code EFAULT} for a page it cannot get, where a write from Java would fault.
+     * Faults in {@code [address, address + length)} through the kernel: the {@code getrandom} syscall writes into it
+     * from kernel mode, and returns {@code EFAULT} for a page it cannot get, where a write from Java would fault.
      */
     private void populate(long address, long length) {
         long done = 0;
         while (done < length) {
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment state = arena.allocate(captureLayout);
-                long n = (long) getrandom.invokeExact(state, MemorySegment.ofAddress(address + done), length - done, 0);
+                long n = (long) getrandom.invokeExact(state, SYS_GETRANDOM, MemorySegment.ofAddress(address + done),
+                        length - done, 0);
                 if (n < 0) {
                     int error = errno(state);
                     if (error != EINTR) {
