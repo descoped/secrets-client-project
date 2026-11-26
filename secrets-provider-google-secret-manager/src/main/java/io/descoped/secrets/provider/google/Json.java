@@ -9,7 +9,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A strict JSON reader (RFC 8259) over a segment, for the few response shapes this provider reads. It copies nothing:
+ * A JSON reader (RFC 8259, strict about structure and escapes; bytes above 0x7F are not checked as UTF-8) over a
+ * segment, for the few response shapes this provider reads. It copies nothing:
  * strings and numbers are spans of the segment, so a secret in a string is decoded by the caller straight from the
  * segment into guarded memory ({@link Codec#unescape}). Only object keys, which are never secret, are put on the heap.
  * Errors never quote the input.

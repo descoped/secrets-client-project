@@ -3,6 +3,8 @@ package io.descoped.secrets.provider.google;
 import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretMemory;
 
+import javax.net.ssl.SSLContext;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.foreign.MemorySegment;
@@ -12,23 +14,30 @@ import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * The HTTP/1.1 this provider needs, on guarded memory: a request is built in a {@link Secret} (it may carry the access
  * token and a value), written from there, and the response is read into guarded memory and handed back as a
- * {@link Secret} body. One connection per request ({@code Connection: close}); bodies with {@code Content-Length},
- * chunked, or up to the end of the stream.
+ * {@link Secret} body. One connection per request ({@code Connection: close}); bodies framed by
+ * {@code Content-Length} or chunked encoding.
+ *
+ * <p>Guarded memory is open for writing only to move bytes that have already arrived: the wait for the server
+ * happens with none open ({@link Connection#awaitData(long)}).
  */
 final class Http {
 
     /** The largest response read: Secret Manager values are at most 64 KiB, about 88 KiB as Base64 in JSON. */
     static final long MAX_RESPONSE = 4L * 1024 * 1024;
 
-    private static final long INITIAL = 32 * 1024;
+    private static final long CHUNK = 32L * 1024;
+    private static final int MAX_HEAD = 64 * 1024;
     private static final byte[] CRLF = {'\r', '\n'};
     private static final byte[] AUTHORIZATION = "Authorization: Bearer ".getBytes(StandardCharsets.US_ASCII);
+    private static final Pattern STATUS_LINE = Pattern.compile("HTTP/1\\.[01] ([1-5]\\d\\d)( .*)?");
 
     private Http() {
     }
@@ -36,31 +45,35 @@ final class Http {
     /**
      * Where requests go.
      *
-     * @param tls  whether to use TLS
+     * @param tls  the TLS context, or {@code null} for plain http
      * @param host the host, an IPv6 address without brackets
      * @param port the port
      * @param path the base path, without a trailing {@code /}
      */
-    record Target(boolean tls, String host, int port, String path) {
+    record Target(SSLContext tls, String host, int port, String path) {
 
-        /** The target of an http or https URI. */
-        static Target of(URI uri) {
-            boolean tls = "https".equalsIgnoreCase(uri.getScheme());
+        /** The target of an http or https URI; {@code tls} is used for https. */
+        static Target of(URI uri, SSLContext tls) {
+            boolean secure = "https".equalsIgnoreCase(uri.getScheme());
             String host = uri.getHost();
             if (host.startsWith("[") && host.endsWith("]")) {
                 host = host.substring(1, host.length() - 1);
             }
-            int port = uri.getPort() >= 0 ? uri.getPort() : tls ? 443 : 80;
+            int port = uri.getPort();
+            if (port < 0) {
+                port = secure ? 443 : 80;
+            }
             String path = uri.getRawPath() == null ? "" : uri.getRawPath();
             while (path.endsWith("/")) {
                 path = path.substring(0, path.length() - 1);
             }
-            return new Target(tls, host, port, path);
+            return new Target(secure ? tls : null, host, port, path);
         }
 
         String hostHeader() {
             String name = host.indexOf(':') >= 0 ? "[" + host + "]" : host;
-            return port == (tls ? 443 : 80) ? name : name + ":" + port;
+            int defaultPort = tls == null ? 80 : 443;
+            return port == defaultPort ? name : name + ":" + port;
         }
     }
 
@@ -133,268 +146,284 @@ final class Http {
                 }
                 return null;
             });
-            return new Reader(connection, deadline).read(memory);
+            return read(connection, deadline, memory);
         } catch (UncheckedIOException e) {
             throw e.getCause();
         }
     }
 
-    /** Reads one response into guarded memory, growing it as needed. */
-    private static final class Reader {
-        private final Connection connection;
-        private final long deadline;
-        private long filled;
-        private boolean eof;
-        private boolean complete;
-        private long searched;
-        private long headerEnd = -1;
+    /**
+     * Reads the response: each burst of data into a chunk of guarded memory, opened only once the data has arrived,
+     * then the body from the chunks into one secret.
+     */
+    private static Response read(Connection connection, long deadline, SecretMemory memory) throws IOException {
+        List<Secret> chunks = new ArrayList<>();
+        List<Long> lengths = new ArrayList<>();
+        Framing framing = new Framing();
+        long total = 0;
+        try {
+            boolean ended = false;
+            while (!framing.complete() && !ended) {
+                connection.awaitData(deadline);
+                long[] read = {0};
+                boolean[] end = {false};
+                try (Secret burst = memory.allocate(Math.max(CHUNK, 2L * connection.minReadSpace()), segment -> {
+                    try {
+                        read[0] = fill(connection, segment, end);
+                        framing.feed(segment, read[0]);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                })) {
+                    // Kept at its exact size, so that a response arriving in many small bursts holds no more locked
+                    // memory than its own size.
+                    long length = read[0];
+                    chunks.add(memory.allocate(length, out -> burst.withSegment(in -> {
+                        MemorySegment.copy(in, 0, out, 0, length);
+                        return null;
+                    })));
+                }
+                lengths.add(read[0]);
+                ended = end[0];
+                total += read[0];
+                if (total > MAX_RESPONSE + MAX_HEAD) {
+                    throw new ProtocolException("The response is too large");
+                }
+            }
+            if (!framing.complete()) {
+                throw new ProtocolException("The connection closed before the response was complete");
+            }
+            Framing copy = new Framing();
+            Secret body = memory.allocate(framing.bodyLength(), out -> {
+                copy.output(out);
+                for (int i = 0; i < chunks.size(); i++) {
+                    long length = lengths.get(i);
+                    chunks.get(i).withSegment(segment -> {
+                        copy.feedUnchecked(segment, length);
+                        return null;
+                    });
+                }
+            });
+            return new Response(framing.status(), body);
+        } finally {
+            chunks.forEach(Secret::close);
+        }
+    }
+
+    /** Reads what has arrived into {@code segment} without waiting; notes the end of the stream in {@code end}. */
+    private static long fill(Connection connection, MemorySegment segment, boolean[] end) throws IOException {
+        ByteBuffer buffer = segment.asByteBuffer();
+        while (buffer.remaining() >= connection.minReadSpace()) {
+            int n = connection.readAvailable(buffer);
+            if (n < 0) {
+                end[0] = true;
+                break;
+            }
+            if (n == 0) {
+                break;
+            }
+        }
+        return buffer.position();
+    }
+
+    /**
+     * The framing of a response, fed its bytes in order: the head (status line and headers, which are not secret and
+     * are collected on the heap), then a body framed by {@code Content-Length} or chunked encoding. Given an output
+     * segment, it also copies the body's data there.
+     */
+    private static final class Framing {
+
+        private enum State { HEAD, BODY, SIZE, SIZE_END, DATA, DATA_CR, DATA_LF, TRAILER, TRAILER_LINE, DONE }
+
+        private final ByteArrayOutputStream head = new ByteArrayOutputStream();
+        private MemorySegment out;
+        private int tail;
+        private State state = State.HEAD;
         private int status;
         private long contentLength = -1;
         private boolean chunked;
+        private long remaining;
+        private long size;
+        private boolean sizeDigits;
+        private long bodyLength;
+        private long written;
 
-        Reader(Connection connection, long deadline) {
-            this.connection = connection;
-            this.deadline = deadline;
+        void output(MemorySegment segment) {
+            this.out = segment;
         }
 
-        Response read(SecretMemory memory) throws IOException {
-            Secret buffer = null;
+        boolean complete() {
+            return state == State.DONE;
+        }
+
+        int status() {
+            return status;
+        }
+
+        long bodyLength() {
+            return bodyLength;
+        }
+
+        void feedUnchecked(MemorySegment segment, long length) {
             try {
-                long capacity = Math.max(INITIAL, 2L * connection.minReadSpace());
-                while (true) {
-                    Secret previous = buffer;
-                    long copied = filled;
-                    buffer = memory.allocate(capacity, segment -> {
-                        if (previous != null) {
-                            previous.withSegment(p -> {
-                                MemorySegment.copy(p, 0, segment, 0, copied);
-                                return null;
-                            });
-                        }
-                        try {
-                            fill(segment);
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    });
-                    if (previous != null) {
-                        previous.close();
-                    }
-                    if (complete || eof) {
-                        return response(buffer, memory);
-                    }
-                    if (capacity >= MAX_RESPONSE + INITIAL) {
-                        throw new ProtocolException("The response is too large");
-                    }
-                    capacity = Math.min(capacity * 2, MAX_RESPONSE + INITIAL);
-                }
-            } finally {
-                if (buffer != null) {
-                    buffer.close();
-                }
+                feed(segment, length);
+            } catch (ProtocolException e) {
+                throw new UncheckedIOException(e);
             }
         }
 
-        private void fill(MemorySegment segment) throws IOException {
-            ByteBuffer buffer = segment.asByteBuffer().position(Math.toIntExact(filled));
-            while (!complete) {
-                if (buffer.remaining() < connection.minReadSpace()) {
-                    return;
+        /** Takes the bytes {@code [0, length)} of {@code segment}. */
+        void feed(MemorySegment segment, long length) throws ProtocolException {
+            long pos = 0;
+            while (pos < length && state != State.DONE) {
+                if (state == State.BODY || state == State.DATA) {
+                    long n = Math.min(remaining, length - pos);
+                    data(segment, pos, n);
+                    pos += n;
+                    remaining -= n;
+                    if (remaining == 0) {
+                        state = state == State.BODY ? State.DONE : State.DATA_CR;
+                    }
+                } else {
+                    step(segment.get(ValueLayout.JAVA_BYTE, pos++));
                 }
-                int n = connection.read(buffer, deadline);
-                if (n < 0) {
-                    eof = true;
-                    return;
-                }
-                filled = buffer.position();
-                update(segment);
+            }
+            if (pos < length) {
+                throw new ProtocolException("Data after the response");
             }
         }
 
-        private void update(MemorySegment segment) throws ProtocolException {
-            if (headerEnd < 0) {
-                long end = indexOf(segment, Math.max(0, searched - 3), filled, "\r\n\r\n");
-                if (end < 0) {
-                    searched = filled;
-                    return;
-                }
-                headerEnd = end + 4;
-                head(segment);
+        private void data(MemorySegment segment, long from, long n) {
+            if (out != null) {
+                MemorySegment.copy(segment, from, out, written, n);
             }
-            if (status == 204 || status == 304 || status / 100 == 1) {
-                complete = true;
-            } else if (chunked) {
-                complete = chunks(segment, headerEnd, filled, null) >= 0;
-            } else if (contentLength >= 0) {
-                complete = filled >= headerEnd + contentLength;
+            written += n;
+        }
+
+        private void step(byte b) throws ProtocolException {
+            switch (state) {
+                case HEAD -> head(b);
+                case SIZE -> size(b);
+                case SIZE_END -> {
+                    // A chunk extension, ignored, up to the line feed.
+                    if (b == '\n') {
+                        endOfSize();
+                    }
+                }
+                case DATA_CR -> expect(b, '\r', State.DATA_LF);
+                case DATA_LF -> expect(b, '\n', State.SIZE);
+                case TRAILER -> trailer(b);
+                case TRAILER_LINE -> {
+                    if (b == '\n') {
+                        state = State.TRAILER;
+                    }
+                }
+                default -> throw new ProtocolException("Unexpected framing state");
             }
         }
 
-        /** The status line and the headers that frame the body; the other headers are not read. */
-        private void head(MemorySegment segment) throws ProtocolException {
-            long lineEnd = indexOf(segment, 0, headerEnd, "\r\n");
-            String statusLine = ascii(segment, 0, lineEnd);
-            if (!statusLine.matches("HTTP/1\\.[01] [1-5]\\d\\d( .*)?")) {
+        private void expect(byte b, char wanted, State next) throws ProtocolException {
+            if (b != wanted) {
+                throw new ProtocolException("Malformed chunk");
+            }
+            state = next;
+        }
+
+        private void head(byte b) throws ProtocolException {
+            head.write(b);
+            if (head.size() > MAX_HEAD) {
+                throw new ProtocolException("The response head is too large");
+            }
+            tail = tail << 8 | b & 0xFF;
+            if (tail == 0x0D0A0D0A) {
+                parseHead(head.toString(StandardCharsets.ISO_8859_1));
+            }
+        }
+
+        private void parseHead(String text) throws ProtocolException {
+            String[] lines = text.split("\r\n");
+            java.util.regex.Matcher statusLine = STATUS_LINE.matcher(lines[0]);
+            if (!statusLine.matches()) {
                 throw new ProtocolException("Not an HTTP/1.1 response");
             }
-            status = Integer.parseInt(statusLine.substring(9, 12));
+            status = Integer.parseInt(statusLine.group(1));
             if (status / 100 == 1) {
                 throw new ProtocolException("Unexpected interim response " + status);
             }
-            long pos = lineEnd + 2;
-            while (pos < headerEnd - 2) {
-                long end = indexOf(segment, pos, headerEnd, "\r\n");
-                long colon = indexOf(segment, pos, end, ":");
-                if (colon > pos) {
-                    header(segment, pos, colon, end);
+            for (int i = 1; i < lines.length; i++) {
+                int colon = lines[i].indexOf(':');
+                if (colon > 0) {
+                    header(lines[i].substring(0, colon).strip().toLowerCase(Locale.ROOT),
+                            lines[i].substring(colon + 1).strip());
                 }
-                pos = end + 2;
+            }
+            if (status == 204 || status == 304) {
+                state = State.DONE;
+            } else if (chunked) {
+                state = State.SIZE;
+            } else if (contentLength >= 0) {
+                bodyLength = contentLength;
+                remaining = contentLength;
+                state = contentLength == 0 ? State.DONE : State.BODY;
+            } else {
+                throw new ProtocolException("The response has neither Content-Length nor chunked encoding");
             }
         }
 
-        private void header(MemorySegment segment, long start, long colon, long end) throws ProtocolException {
-            String name = ascii(segment, start, colon).toLowerCase(Locale.ROOT);
+        private void header(String name, String value) throws ProtocolException {
             if (name.equals("content-length")) {
-                String value = ascii(segment, colon + 1, end).strip();
                 if (!value.matches("\\d{1,10}")) {
                     throw new ProtocolException("Invalid Content-Length");
                 }
                 long length = Long.parseLong(value);
-                if (contentLength >= 0 && contentLength != length || length > MAX_RESPONSE) {
-                    throw new ProtocolException(length > MAX_RESPONSE ? "The response is too large"
-                            : "Conflicting Content-Length");
+                if (length > MAX_RESPONSE) {
+                    throw new ProtocolException("The response is too large");
+                }
+                if (contentLength >= 0 && contentLength != length) {
+                    throw new ProtocolException("Conflicting Content-Length");
                 }
                 contentLength = length;
             } else if (name.equals("transfer-encoding")) {
-                String value = ascii(segment, colon + 1, end).strip().toLowerCase(Locale.ROOT);
-                chunked = value.endsWith("chunked");
+                chunked = value.toLowerCase(Locale.ROOT).endsWith("chunked");
             }
         }
 
-        private Response response(Secret buffer, SecretMemory memory) throws ProtocolException {
-            if (headerEnd < 0 || !complete && (chunked || contentLength >= 0)) {
-                throw new ProtocolException("The connection closed before the response was complete");
-            }
-            long start = headerEnd;
-            long end = filled;
-            long length;
-            if (status == 204 || status == 304) {
-                length = 0;
-            } else if (chunked) {
-                length = buffer.withSegment(segment -> chunksUnchecked(segment, start, end, null));
-            } else if (contentLength >= 0) {
-                length = contentLength;
+        private void size(byte b) throws ProtocolException {
+            int digit = Character.digit(b, 16);
+            if (digit >= 0) {
+                size = size << 4 | digit;
+                sizeDigits = true;
+                if (bodyLength + size > MAX_RESPONSE) {
+                    throw new ProtocolException("The response is too large");
+                }
+            } else if (!sizeDigits) {
+                throw new ProtocolException("Malformed chunk size");
+            } else if (b == '\n') {
+                endOfSize();
             } else {
-                length = end - start;
+                state = State.SIZE_END;
             }
-            Secret body = memory.allocate(length, out -> buffer.withSegment(segment -> {
-                if (chunked) {
-                    chunksUnchecked(segment, start, end, out);
-                } else {
-                    MemorySegment.copy(segment, start, out, 0, length);
-                }
-                return null;
-            }));
-            return new Response(status, body);
         }
-    }
 
-    private static long chunksUnchecked(MemorySegment segment, long from, long to, MemorySegment out) {
-        try {
-            return chunks(segment, from, to, out);
-        } catch (ProtocolException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    /**
-     * Walks a chunked body at {@code [from, to)}: returns the length of its data once it is complete (and copies the
-     * data into {@code out} if not {@code null}), or -1 if more is needed.
-     */
-    static long chunks(MemorySegment segment, long from, long to, MemorySegment out) throws ProtocolException {
-        long pos = from;
-        long total = 0;
-        while (true) {
-            long lineEnd = indexOf(segment, pos, to, "\r\n");
-            if (lineEnd < 0) {
-                return -1;
-            }
-            long size = chunkSize(segment, pos, lineEnd);
-            pos = lineEnd + 2;
+        private void endOfSize() {
             if (size == 0) {
-                // Trailer lines up to an empty line.
-                while (true) {
-                    long end = indexOf(segment, pos, to, "\r\n");
-                    if (end < 0) {
-                        return -1;
-                    }
-                    if (end == pos) {
-                        return total;
-                    }
-                    pos = end + 2;
-                }
+                state = State.TRAILER;
+            } else {
+                bodyLength += size;
+                remaining = size;
+                state = State.DATA;
             }
-            if (total + size > MAX_RESPONSE) {
-                throw new ProtocolException("The response is too large");
-            }
-            if (pos + size + 2 > to) {
-                return -1;
-            }
-            if (out != null) {
-                MemorySegment.copy(segment, pos, out, total, size);
-            }
-            total += size;
-            pos += size;
-            if (byteAt(segment, pos) != '\r' || byteAt(segment, pos + 1) != '\n') {
-                throw new ProtocolException("Malformed chunk");
-            }
-            pos += 2;
+            size = 0;
+            sizeDigits = false;
         }
-    }
 
-    private static long chunkSize(MemorySegment segment, long start, long end) throws ProtocolException {
-        long size = 0;
-        long pos = start;
-        while (pos < end) {
-            int digit = Character.digit(byteAt(segment, pos), 16);
-            if (digit < 0) {
-                break;
+        /** At the start of a trailer line: an empty line ends the body, any other is skipped. */
+        private void trailer(byte b) {
+            if (b == '\n') {
+                state = State.DONE;
+            } else if (b != '\r') {
+                state = State.TRAILER_LINE;
             }
-            size = size << 4 | digit;
-            if (size > MAX_RESPONSE) {
-                throw new ProtocolException("The response is too large");
-            }
-            pos++;
         }
-        if (pos == start || pos < end && byteAt(segment, pos) != ';' && byteAt(segment, pos) != ' '
-                && byteAt(segment, pos) != '\t') {
-            throw new ProtocolException("Malformed chunk size");
-        }
-        return size;
-    }
-
-    private static byte byteAt(MemorySegment segment, long index) {
-        return segment.get(ValueLayout.JAVA_BYTE, index);
-    }
-
-    /** The first index of {@code text} (ASCII) in {@code [from, to)}, or -1. */
-    private static long indexOf(MemorySegment segment, long from, long to, String text) {
-        int n = text.length();
-        outer:
-        for (long i = from; i + n <= to; i++) {
-            for (int k = 0; k < n; k++) {
-                if (byteAt(segment, i + k) != text.charAt(k)) {
-                    continue outer;
-                }
-            }
-            return i;
-        }
-        return -1;
-    }
-
-    /** Header text, which is not secret. */
-    private static String ascii(MemorySegment segment, long from, long to) {
-        return new String(segment.asSlice(from, to - from).toArray(ValueLayout.JAVA_BYTE),
-                StandardCharsets.ISO_8859_1);
     }
 }

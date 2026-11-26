@@ -168,8 +168,8 @@ final class FakeGoogle implements AutoCloseable {
                 exchange.getRequestHeaders().getFirst("Authorization"), body));
         List<Response> answers = responses.get(exchange.getRequestMethod() + " " + path);
         if (answers == null || answers.isEmpty()) {
-            send(exchange, new Response(500, "{\"error\":{\"code\":500,\"status\":\"INTERNAL\",\"message\":\"no fake for "
-                    + exchange.getRequestMethod() + " " + path + "\"}}"));
+            send(exchange, new Response(500, "{\"error\":{\"code\":500,\"status\":\"INTERNAL\","
+                    + "\"message\":\"no fake for " + exchange.getRequestMethod() + " " + path + "\"}}"));
             return;
         }
         Response response;
@@ -182,15 +182,19 @@ final class FakeGoogle implements AutoCloseable {
     private static void send(HttpExchange exchange, Response response) throws IOException {
         if (response.delayMillis() > 0) {
             try {
-                Thread.sleep(response.delayMillis());
-            } catch (InterruptedException e) {
+                // A latch nobody counts down: a delay that an interrupt (the fake's shutdown) ends.
+                new java.util.concurrent.CountDownLatch(1).await(response.delayMillis(),
+                        java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 return;
             }
         }
         byte[] bytes = response.body().getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");
-        exchange.sendResponseHeaders(response.status(), response.chunked() ? 0 : bytes.length == 0 ? -1 : bytes.length);
+        // 0 asks the server for chunked encoding, -1 for an empty body with Content-Length: 0.
+        long length = bytes.length == 0 ? -1 : bytes.length;
+        exchange.sendResponseHeaders(response.status(), response.chunked() ? 0 : length);
         try (OutputStream out = exchange.getResponseBody()) {
             if (response.chunked()) {
                 // Several chunks, so that a value spans them.

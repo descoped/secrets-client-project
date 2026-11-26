@@ -83,7 +83,9 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
         }
     }
 
-    /** Copies the value into guarded memory, wiping the heap copy, and adds it as {@link #addVersion(String, Secret)}. */
+    /**
+     * Copies the value into guarded memory, wiping the heap copy, and adds it as {@link #addVersion(String, Secret)}.
+     */
     @Override
     public String addVersion(String secretName, byte[] secretValue) {
         Objects.requireNonNull(secretName, SECRET_NAME);

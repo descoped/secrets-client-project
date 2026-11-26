@@ -53,6 +53,11 @@ class GoogleSecretManagerClientTest {
     }
 
     private SecretManagerClient open(Map<String, String> extra) throws IOException {
+        return SecretManagerClient.create(configuration(extra));
+    }
+
+    /** The configuration of a client of the fake, with {@code extra} on top. */
+    private Map<String, String> configuration(Map<String, String> extra) throws IOException {
         Map<String, String> configuration = new HashMap<>(Map.of(
                 "secrets.provider", "google-secret-manager",
                 "secrets.project-id", "test-project",
@@ -60,7 +65,7 @@ class GoogleSecretManagerClientTest {
                 "secrets.token-endpoint", google.tokenEndpoint(),
                 "secrets.endpoint", google.endpoint()));
         configuration.putAll(extra);
-        return SecretManagerClient.create(configuration);
+        return configuration;
     }
 
     private SecretManagerClient open() throws IOException {
@@ -273,8 +278,8 @@ class GoogleSecretManagerClientTest {
     void theEndpointMustUseHttpsExceptOnLoopback() throws IOException {
         for (String endpoint : List.of("http://secretmanager.googleapis.com", "http://10.0.0.1:8080", "ftp://host",
                 "http://localhost.evil.example", "https://")) {
-            Map<String, String> configuration = Map.of("secrets.endpoint", endpoint);
-            assertThrows(IllegalArgumentException.class, () -> open(configuration), endpoint);
+            Map<String, String> configuration = configuration(Map.of("secrets.endpoint", endpoint));
+            assertThrows(IllegalArgumentException.class, () -> SecretManagerClient.create(configuration), endpoint);
         }
         for (String endpoint : List.of("https://europe-north1-secretmanager.googleapis.com", "http://localhost:1",
                 "http://127.0.0.1:1", "http://[::1]:1")) {
@@ -292,25 +297,31 @@ class GoogleSecretManagerClientTest {
         for (Map.Entry<String, String> type : types.entrySet()) {
             Path file = dir.resolve(type.getKey().replace(' ', '-') + ".json");
             Files.writeString(file, type.getValue());
+            Map<String, String> configuration = configuration(Map.of("secrets.credentials-path", file.toString()));
             SecretManagerException e = assertThrows(SecretManagerException.class,
-                    () -> open(Map.of("secrets.credentials-path", file.toString())), type.getKey());
+                    () -> SecretManagerClient.create(configuration), type.getKey());
             assertTrue(e.getMessage().contains(type.getKey()), e.getMessage());
             assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
         }
         Path incomplete = dir.resolve("incomplete.json");
         Files.writeString(incomplete, "{\"type\":\"authorized_user\",\"client_id\":\"c\",\"client_secret\":\"s\"}");
+        Map<String, String> withIncomplete = configuration(Map.of("secrets.credentials-path", incomplete.toString()));
         SecretManagerException e = assertThrows(SecretManagerException.class,
-                () -> open(Map.of("secrets.credentials-path", incomplete.toString())));
+                () -> SecretManagerClient.create(withIncomplete));
         assertTrue(e.getMessage().endsWith("has no refresh_token"), e.getMessage());
         Path broken = dir.resolve("broken.json");
         Files.writeString(broken, "{\"type\":\"authorized_user\",\"refresh_token\":\"hunter2");
-        e = assertThrows(SecretManagerException.class, () -> open(Map.of("secrets.credentials-path", broken.toString())));
+        Map<String, String> withBroken = configuration(Map.of("secrets.credentials-path", broken.toString()));
+        e = assertThrows(SecretManagerException.class, () -> SecretManagerClient.create(withBroken));
         assertTrue(e.getMessage().endsWith("is not valid JSON"), e.getMessage());
         assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
         Path missing = dir.resolve("missing.json");
-        assertThrows(SecretManagerException.class, () -> open(Map.of("secrets.credentials-path", missing.toString())));
+        Map<String, String> withMissing = configuration(Map.of("secrets.credentials-path", missing.toString()));
+        assertThrows(SecretManagerException.class, () -> SecretManagerClient.create(withMissing));
+        Map<String, String> withRemovedKey = configuration(Map.of("secrets.service-account-key-path",
+                missing.toString()));
         IllegalArgumentException removed = assertThrows(IllegalArgumentException.class,
-                () -> open(Map.of("secrets.service-account-key-path", missing.toString())));
+                () -> SecretManagerClient.create(withRemovedKey));
         assertTrue(removed.getMessage().contains("no longer supported"), removed.getMessage());
     }
 
@@ -340,7 +351,7 @@ class GoogleSecretManagerClientTest {
     }
 
     @Test
-    void theMetadataServerGivesTheTokenOnGoogleCloud() throws IOException {
+    void theMetadataServerGivesTheTokenOnGoogleCloud() {
         google.on("GET", SECRETS + "/a/versions/latest:access", access("1"));
         Map<String, String> metadata = Map.of(
                 "secrets.provider", "google-secret-manager",

@@ -3,6 +3,7 @@ package io.descoped.secrets.provider.google.test;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.provider.google.test.FakeGoogle.Response;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,7 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The provider over TLS ({@code SSLEngine}), against FakeGoogle on https with certificates made by keytool and trusted
- * through {@code javax.net.ssl.trustStore}, as an application would add a private CA.
+ * through {@code javax.net.ssl.trustStore}, as an application would add a private CA. The properties are read when a
+ * client is created, so the order of test classes does not matter; they are cleared afterwards.
  */
 class GoogleSecretManagerTlsTest {
 
@@ -45,12 +47,20 @@ class GoogleSecretManagerTlsTest {
     /** A trusted certificate for another name only. */
     private static SSLContext otherName;
 
+    /** Back to the JDK's own trust store, for whatever runs after this class in the same JVM. */
+    @AfterAll
+    static void forgetTheTestTrustStore() {
+        System.clearProperty("javax.net.ssl.trustStore");
+        System.clearProperty("javax.net.ssl.trustStorePassword");
+        System.clearProperty("javax.net.ssl.trustStoreType");
+    }
+
     @BeforeAll
     static void certificates() throws IOException, InterruptedException, GeneralSecurityException {
         Path trust = keys.resolve("trust.p12");
         matching = server("matching", "SAN=ip:127.0.0.1", trust);
         otherName = server("other", "SAN=dns:elsewhere.example", trust);
-        // Read once, when the JDK's default SSLContext is first made; nothing in this JVM uses TLS before.
+        // Read when a client is created: each has a TLS context of its own.
         System.setProperty("javax.net.ssl.trustStore", trust.toString());
         System.setProperty("javax.net.ssl.trustStorePassword", PASSWORD);
         System.setProperty("javax.net.ssl.trustStoreType", "PKCS12");

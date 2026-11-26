@@ -158,59 +158,85 @@ final class Codec {
      * @throws MalformedException if an escape is invalid
      */
     static long unescape(MemorySegment src, MemorySegment dst) throws MalformedException {
-        long n = src.byteSize();
-        long out = 0;
-        long i = 0;
-        while (i < n) {
-            byte b = get(src, i);
-            if (b != '\\') {
-                if (dst != null) {
-                    put(dst, out, b);
+        return new Unescaper(src, dst).run();
+    }
+
+    /** Walks a JSON string's content once, writing (or only counting) the unescaped bytes. */
+    private static final class Unescaper {
+        private final MemorySegment src;
+        private final MemorySegment dst;
+        private long in;
+        private long out;
+
+        Unescaper(MemorySegment src, MemorySegment dst) {
+            this.src = src;
+            this.dst = dst;
+        }
+
+        long run() throws MalformedException {
+            long n = src.byteSize();
+            while (in < n) {
+                byte b = get(src, in);
+                if (b == '\\') {
+                    escape();
+                } else {
+                    emit(b);
+                    in++;
                 }
-                out++;
-                i++;
-                continue;
             }
-            if (i + 1 >= n) {
+            return out;
+        }
+
+        private void emit(int b) {
+            if (dst != null) {
+                put(dst, out, b);
+            }
+            out++;
+        }
+
+        private void escape() throws MalformedException {
+            if (in + 1 >= src.byteSize()) {
                 throw new MalformedException("JSON escape");
             }
-            byte e = get(src, i + 1);
-            int simple = switch (e) {
-                case '"', '\\', '/' -> e;
-                case 'b' -> '\b';
-                case 'f' -> '\f';
-                case 'n' -> '\n';
-                case 'r' -> '\r';
-                case 't' -> '\t';
-                case 'u' -> -1;
-                default -> throw new MalformedException("JSON escape");
-            };
-            if (simple >= 0) {
-                if (dst != null) {
-                    put(dst, out, simple);
-                }
-                out++;
-                i += 2;
-                continue;
+            byte e = get(src, in + 1);
+            if (e == 'u') {
+                unicode();
+            } else {
+                emit(simpleEscape(e));
+                in += 2;
             }
-            int cp = hex4(src, i + 2);
-            i += 6;
+        }
+
+        private void unicode() throws MalformedException {
+            int cp = hex4(src, in + 2);
+            in += 6;
             if (cp >= 0xD800 && cp <= 0xDBFF) {
-                if (i + 6 > n || get(src, i) != '\\' || get(src, i + 1) != 'u') {
+                if (in + 6 > src.byteSize() || get(src, in) != '\\' || get(src, in + 1) != 'u') {
                     throw new MalformedException("JSON surrogate");
                 }
-                int low = hex4(src, i + 2);
+                int low = hex4(src, in + 2);
                 if (low < 0xDC00 || low > 0xDFFF) {
                     throw new MalformedException("JSON surrogate");
                 }
                 cp = 0x10000 + (cp - 0xD800 << 10) + (low - 0xDC00);
-                i += 6;
+                in += 6;
             } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
                 throw new MalformedException("JSON surrogate");
             }
             out = putUtf8(dst, out, cp);
         }
-        return out;
+    }
+
+    private static int simpleEscape(byte e) throws MalformedException {
+        return switch (e) {
+            case '"', '\\', '/' -> e;
+            case 'b' -> '\b';
+            case 'f' -> '\f';
+            case 'n' -> '\n';
+            case 'r' -> '\r';
+            case 't' -> '\t';
+            default -> throw new MalformedException("JSON escape");
+        };
     }
 
     private static int hex4(MemorySegment src, long at) throws MalformedException {
@@ -228,8 +254,18 @@ final class Codec {
         return value;
     }
 
+    private static int utf8Length(int cp) {
+        if (cp < 0x80) {
+            return 1;
+        }
+        if (cp < 0x800) {
+            return 2;
+        }
+        return cp < 0x10000 ? 3 : 4;
+    }
+
     private static long putUtf8(MemorySegment dst, long out, int cp) {
-        int length = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+        int length = utf8Length(cp);
         if (dst != null) {
             switch (length) {
                 case 1 -> put(dst, out, cp);

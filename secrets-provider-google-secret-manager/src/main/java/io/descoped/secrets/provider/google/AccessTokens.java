@@ -163,6 +163,8 @@ final class AccessTokens implements AutoCloseable {
      */
     record MetadataServer(Http.Target target, Http.Timeouts timeouts, SecretMemory memory) implements Source {
 
+        /** The metadata server's fixed path for the attached service account's token; not configurable by design. */
+        @SuppressWarnings("java:S1075")
         static final String PATH = "/computeMetadata/v1/instance/service-accounts/default/token";
 
         @Override
@@ -245,35 +247,40 @@ final class AccessTokens implements AutoCloseable {
          */
         static AuthorizedUser load(Path file, Http.Target target, Http.Timeouts timeouts, SecretMemory memory) {
             try (Secret content = read(file, memory)) {
-                return content.withSegment(json -> {
-                    try {
-                        if (!(Json.parse(json) instanceof Json.Obj object)) {
-                            throw new Codec.MalformedException("not an object");
-                        }
-                        String type = object.string("type") == null ? "" : Json.text(json, object.string("type"));
-                        if (!type.equals("authorized_user")) {
-                            throw new SecretManagerException("The Google credentials file " + file + " is "
-                                    + (type.matches("[a-z_]{1,64}") ? "of type '" + type + "'" : "of no known type")
-                                    + ": this provider reads only authorized_user credentials (gcloud auth"
-                                    + " application-default login), and on Google Cloud the metadata server. Keys"
-                                    + " (service_account) are refused: signing with them would put the key on the"
-                                    + " Java heap.");
-                        }
-                        Json.Str id = required(object, "client_id", file);
-                        Json.Str secret = required(object, "client_secret", file);
-                        Json.Str refresh = required(object, "refresh_token", file);
-                        Secret clientSecret = unescaped(memory, json, secret);
-                        try {
-                            return new AuthorizedUser(target, timeouts, memory, Json.text(json, id), clientSecret,
-                                    unescaped(memory, json, refresh));
-                        } catch (Codec.MalformedException | RuntimeException e) {
-                            clientSecret.close();
-                            throw e;
-                        }
-                    } catch (Codec.MalformedException _) {
-                        throw new SecretManagerException("The Google credentials file " + file + " is not valid JSON");
-                    }
-                });
+                return content.withSegment(json -> fromJson(json, file, target, timeouts, memory));
+            }
+        }
+
+        private static AuthorizedUser fromJson(MemorySegment json, Path file, Http.Target target,
+                                               Http.Timeouts timeouts, SecretMemory memory) {
+            Json.Obj object;
+            String type;
+            try {
+                object = Json.parse(json) instanceof Json.Obj o ? o : null;
+                type = object == null || object.string("type") == null ? "" : Json.text(json, object.string("type"));
+            } catch (Codec.MalformedException _) {
+                throw new SecretManagerException("The Google credentials file " + file + " is not valid JSON");
+            }
+            if (object == null || !type.equals("authorized_user")) {
+                throw new SecretManagerException("The Google credentials file " + file + " is "
+                        + (type.matches("[a-z_]{1,64}") ? "of type '" + type + "'" : "of no known type")
+                        + ": this provider reads only authorized_user credentials (gcloud auth"
+                        + " application-default login), and on Google Cloud the metadata server. Keys"
+                        + " (service_account) are refused: signing with them would put the key on the Java heap.");
+            }
+            Json.Str id = required(object, "client_id", file);
+            Json.Str secret = required(object, "client_secret", file);
+            Json.Str refresh = required(object, "refresh_token", file);
+            Secret clientSecret = null;
+            try {
+                clientSecret = unescaped(memory, json, secret);
+                return new AuthorizedUser(target, timeouts, memory, Json.text(json, id), clientSecret,
+                        unescaped(memory, json, refresh));
+            } catch (Codec.MalformedException _) {
+                if (clientSecret != null) {
+                    clientSecret.close();
+                }
+                throw new SecretManagerException("The Google credentials file " + file + " is not valid JSON");
             }
         }
 

@@ -36,12 +36,14 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - Google Secret Manager: service-account keys are refused, and `secrets.service-account-key-path` is an error (signing
   with a key would put it on the Java heap); use the metadata server, or an `authorized_user` file for development.
   The provider needs native access to start.
+- Google Secret Manager: `secrets.connect-timeout` and `secrets.request-timeout` include the host name lookup and are
+  at most one hour.
+- Closing a client inside a callback of a secret it returned throws `IllegalStateException`; a later `close()` wipes.
 
 ### Removed
 
 - google-auth (with google-http-client, Guava, Gson) and Jackson from the Google provider: it depends on the API
   module only.
-- Closing a client inside a callback of a secret it returned throws `IllegalStateException`; a later `close()` wipes.
 
 ## [3.0.0] - 2026-11-17
 

@@ -6,11 +6,13 @@ import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.api.SecretMemory;
 import io.descoped.service.provider.api.ProviderName;
 
+import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
 import java.time.Duration;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
@@ -57,7 +59,8 @@ import java.util.regex.Pattern;
  * </table>
  *
  * <p>The access token is fetched on first use and replaced when it has less than three minutes left. TLS is the
- * JDK's ({@code SSLEngine}, TLS 1.3 or 1.2, the default trust store, host name verification).
+ * JDK's ({@code SSLEngine}, TLS 1.3 or 1.2, the default trust store as configured when the client is created, host
+ * name verification). The timeouts include looking the host name up; they are at most one hour.
  *
  * <p>Versions are Secret Manager's: {@code latest} or a version number; {@code addVersion} returns the new number.
  * Secret names follow Secret Manager's rule: 1 to 255 letters, digits, {@code -} and {@code _}. Reading a name or
@@ -108,6 +111,12 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
     private static final String REMOVED_KEY_PATH_KEY = "secrets.service-account-key-path";
     private static final Pattern PROJECT = Pattern.compile("[a-z0-9][a-z0-9-]{0,62}");
     private static final Pattern LOCATION = Pattern.compile("[a-z0-9-]{1,63}");
+    private static final String APPLICATION_DEFAULT = "application-default";
+    private static final String METADATA = "metadata";
+    /** Google's documented link-local address of the metadata server. */
+    @SuppressWarnings("java:S1313")
+    private static final String METADATA_IP = "169.254.169.254";
+    private static final Duration MAX_TIMEOUT = Duration.ofHours(1);
 
     /**
      * Creates the initializer; called by {@link java.util.ServiceLoader}.
@@ -147,30 +156,45 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
                 throw new IllegalArgumentException("Invalid location in '" + REPLICATION_KEY + "': " + location);
             }
         }
-        String mode = configuration.getOrDefault(CREDENTIALS_KEY, "application-default");
-        if (!mode.equals("application-default") && !mode.equals("metadata")) {
+        String mode = configuration.getOrDefault(CREDENTIALS_KEY, APPLICATION_DEFAULT);
+        if (!mode.equals(APPLICATION_DEFAULT) && !mode.equals(METADATA)) {
             throw new IllegalArgumentException("Invalid '" + CREDENTIALS_KEY + "': " + mode
                     + " (application-default or metadata)");
         }
         String credentialsPath = configuration.get(CREDENTIALS_PATH_KEY);
-        if (mode.equals("metadata") && credentialsPath != null) {
+        if (mode.equals(METADATA) && credentialsPath != null) {
             throw new IllegalArgumentException("'" + CREDENTIALS_PATH_KEY + "' and " + CREDENTIALS_KEY
                     + "=metadata exclude each other");
         }
         Http.Timeouts timeouts = new Http.Timeouts(
                 duration(configuration, CONNECT_TIMEOUT_KEY, Duration.ofSeconds(10)),
                 duration(configuration, REQUEST_TIMEOUT_KEY, Duration.ofSeconds(30)));
+        SSLContext tls = tls();
         SecretMemory memory = SecretMemory.create(configuration);
         try {
-            Path file = mode.equals("metadata") ? null : credentialsFile(credentialsPath);
+            Path file = mode.equals(METADATA) ? null : credentialsFile(credentialsPath);
             AccessTokens.Source source = file == null
-                    ? new AccessTokens.MetadataServer(Http.Target.of(metadataEndpoint), timeouts, memory)
-                    : AccessTokens.AuthorizedUser.load(file, Http.Target.of(tokenEndpoint), timeouts, memory);
-            return new GoogleSecretManagerClient(Http.Target.of(endpoint), projectId, locations, timeouts, memory,
-                    new AccessTokens(source));
+                    ? new AccessTokens.MetadataServer(Http.Target.of(metadataEndpoint, tls), timeouts, memory)
+                    : AccessTokens.AuthorizedUser.load(file, Http.Target.of(tokenEndpoint, tls), timeouts, memory);
+            return new GoogleSecretManagerClient(Http.Target.of(endpoint, tls), projectId, locations, timeouts,
+                    memory, new AccessTokens(source));
         } catch (RuntimeException e) {
             memory.close();
             throw e;
+        }
+    }
+
+    /**
+     * A TLS context of the client's own, with the JDK's default trust store as it is configured now
+     * ({@code javax.net.ssl.trustStore} and the like are read here, not once per JVM).
+     */
+    private static SSLContext tls() {
+        try {
+            SSLContext context = SSLContext.getInstance("TLS");
+            context.init(null, null, null);
+            return context;
+        } catch (GeneralSecurityException e) {
+            throw new SecretManagerException("TLS is not available", e);
         }
     }
 
@@ -214,7 +238,7 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         URI uri = uri(METADATA_ENDPOINT_KEY, value);
         String host = uri.getHost();
         if ("http".equalsIgnoreCase(uri.getScheme()) && (host.equalsIgnoreCase("metadata.google.internal")
-                || host.equals("169.254.169.254") || isLoopback(host))) {
+                || host.equals(METADATA_IP) || isLoopback(host))) {
             return uri;
         }
         throw new IllegalArgumentException("'" + METADATA_ENDPOINT_KEY + "' must be http on metadata.google.internal,"
@@ -257,8 +281,8 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         }
         try {
             Duration duration = Duration.parse(value);
-            if (duration.isNegative() || duration.isZero()) {
-                throw new IllegalArgumentException("'" + key + "' must be positive: " + value);
+            if (duration.isNegative() || duration.isZero() || duration.compareTo(MAX_TIMEOUT) > 0) {
+                throw new IllegalArgumentException("'" + key + "' must be positive and at most PT1H: " + value);
             }
             return duration;
         } catch (DateTimeParseException e) {
