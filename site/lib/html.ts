@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import GithubSlugger from 'github-slugger'
 import { createHighlighter, type Highlighter } from 'shiki'
 
@@ -24,21 +22,14 @@ const escape = (text: string): string =>
 /** The languages of the code blocks in the documentation, and the name each is labelled with */
 const languages: Record<string, string> = {
   sh: 'Shell',
-  console: 'Console',
-  json: 'JSON',
   http: 'HTTP',
-  graphql: 'GraphQL',
-  properties: 'Properties',
-  cypher: 'Cypher',
   java: 'Java',
-  yaml: 'YAML',
-  sql: 'SQL',
   xml: 'XML',
-  svg: 'SVG',
+  dockerfile: 'Dockerfile',
 }
 
 // Shiki's name of a language, where it differs
-const grammarOf: Record<string, string> = { console: 'shellsession', svg: 'xml' }
+const grammarOf: Record<string, string> = {}
 
 // One highlighter for the whole build: loading the grammars and the themes is the slow part
 let highlighter: Promise<Highlighter> | undefined
@@ -68,10 +59,9 @@ async function highlight(lang: string, escaped: string, title?: string): Promise
         defaultColor: false,
       })
     : `<pre class="shiki"><code>${escape(code)}</code></pre>`
-  // An answer can be long: the page shows it in an area of its own height that scrolls. An answer, a session of
-  // commands and their answers, and a block of text (a message, a log) wrap their long lines; code keeps its lines
-  // and scrolls sideways.
-  const kind = lang === 'http' ? ' code-answer code-wrap' : !label || lang === 'console' ? ' code-wrap' : ''
+  // An answer can be long: the page shows it in an area of its own height that scrolls. An answer and a block of text
+  // (a message, a log) wrap their long lines; code keeps its lines and scrolls sideways.
+  const kind = lang === 'http' ? ' code-answer code-wrap' : label ? '' : ' code-wrap'
   return `<div class="code-block${kind}"><div class="code-head"><span class="code-lang">${title ? escape(decode(title)) : (label ?? 'Text')}</span></div>${pre}</div>`
 }
 
@@ -91,45 +81,13 @@ async function replaceAsync(
   return (await Promise.all(parts)).join('')
 }
 
-// The folders of docs/ that hold the figures of the pages, as SVG files
-const figureFolders = ['developer/images', 'user/images', 'images'].map((folder) =>
-  join(process.cwd(), '..', 'docs', folder),
-)
-
-/** The SVG file of a figure by its name, from the first folder of docs/ that has it */
-async function figureSvg(name: string): Promise<string | undefined> {
-  for (const folder of figureFolders) {
-    try {
-      return await readFile(join(folder, name), 'utf8')
-    } catch {
-      // not in this folder
-    }
-  }
-  return undefined
-}
-
-/**
- * A figure of docs/ (an image whose file is an SVG of docs/) put into the page as it is, so the page's stylesheet
- * colours it in the theme the reader picked: its own `<style>` is left out (on GitHub, where it is shown as an image,
- * it follows the system's theme), and the classes it draws with are styled under `.diagram`. Its own title and
- * description name it to a screen reader.
- */
-async function inlineFigure(name: string): Promise<string | undefined> {
-  if (!/^[\w-]+\.svg$/.test(name)) return undefined
-  const svg = await figureSvg(name)
-  if (!svg) return undefined
-  const drawing = svg.replace(/<style>[\s\S]*?<\/style>\s*/, '').trim()
-  return `<figure class="diagram">${drawing}</figure>`
-}
-
 /**
  * The HTML of a page as krantho renders its markdown, made ready to show:
  *
  * - every heading gets the id GitHub gives it (github-slugger, the algorithm GitHub uses), so a link such as
- *   `concepts.md#what-a-field-holds` leads to the same place on the site as on GitHub;
+ *   `api.md#the-contract` leads to the same place on the site as on GitHub;
  * - a ```mermaid block becomes a `<pre class="mermaid">` with its source, which the page draws in the browser;
  * - every other code block is coloured by its language when the site is built (`highlight`);
- * - an SVG figure of docs/ is put into the page itself (`inlineFigure`);
  * - the `##` and `###` headings are listed as the page's contents.
  */
 export async function prepareHtml(source: string): Promise<{ html: string; toc: TocEntry[]; hasFigures: boolean }> {
@@ -147,11 +105,6 @@ export async function prepareHtml(source: string): Promise<{ html: string; toc: 
     return `<pre class="mermaid">${code}</pre>`
   })
   html = await highlightCode(html)
-  html = await replaceAsync(
-    html,
-    /<p>\s*<img src="[^"]*\/([\w-]+\.svg)" alt="[^"]*"\s*\/?>\s*<\/p>/g,
-    async (whole = '', name = '') => (await inlineFigure(name)) ?? whole,
-  )
   return { html, toc, hasFigures }
 }
 

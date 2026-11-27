@@ -131,7 +131,8 @@ Fargate and AWS EC2. [What the canary tests prove](/docs/security/#what-the-cana
 
 Import the BOM, compile against the API, and add the providers you use at runtime: they are found by `ServiceLoader`
 on the module path and the class path. Start the JVM with native access for the API module; without it, a client
-refuses to start rather than run unguarded. [Getting started](/docs/getting-started/)
+refuses to start rather than run unguarded. The modules below take their version from the BOM, whose import and
+current version are in [Getting started](/docs/getting-started/).
 
 <!-- label: pom.xml -->
 ```xml
