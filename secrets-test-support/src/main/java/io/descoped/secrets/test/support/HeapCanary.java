@@ -192,7 +192,9 @@ public final class HeapCanary {
 
         /**
          * Asserts that the subject read the canary and dumped its heap, and that the dump holds a copy of it in
-         * {@code encoding}. For proving the harness finds what it should.
+         * {@code encoding}. For proving the harness finds what it should, and for pinning a known leak outside the
+         * library (the JDK's TLS): such a copy is garbage, found only until the memory is reused, so a test that
+         * pins one may stop finding it for reasons other than the leak being fixed.
          *
          * @param encoding one of the encodings {@link CanaryScan} searches, such as {@code utf-16le}
          * @return this

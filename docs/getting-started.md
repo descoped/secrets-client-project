@@ -94,7 +94,7 @@ Provider | Reads | Writes | Holds values as | Use it for
 ---|---|---|---|---
 `safe-configuration` | a local `key=value` file | yes, atomically, owner-only | guarded memory | local development and tests
 `dynamic-configuration` | a properties file, a secret directory, inline values | no | strings | tests, migration from property files
-`google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | guarded memory | production on Google Cloud
+`google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | guarded memory, except copies the JDK's TLS makes ([details](providers/google-secret-manager.md#memory-and-tls)) | production on Google Cloud
 `mounted` | files the platform mounts (Cloud Run, Kubernetes, Secrets Store CSI) | no | guarded memory, read on every `read` | production where the platform mounts secrets: no credential in the process
 
 Every provider follows the same contract, so switching is a configuration change; see

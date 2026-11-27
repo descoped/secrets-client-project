@@ -97,9 +97,17 @@ the body) and written to the socket from there; each response is read into guard
 and the value decoded from Base64 straight into the `Secret` that `read` returns. `readBytes`, `readChars` and
 `readString` return heap copies for the caller, as their contract says.
 
-TLS is the JDK's `SSLEngine` (TLS 1.3 or 1.2, the default trust store, host name verification and SNI). Whether the
-JDK's TLS copies decrypted data to heap arrays internally is not settled yet: the canary test proves the provider's
-own code over plain HTTP on loopback, and the TLS path is the next step of the 4.0 plan.
+TLS is the JDK's `SSLEngine` (TLS 1.3 or 1.2, the default trust store, host name verification and SNI), and that is
+where the guarantee ends. The provider hands `SSLEngine` only direct buffers, but the JDK's TLS and cipher code copies
+the plaintext through heap arrays while it encrypts and decrypts. So the access token, the refresh token and the
+values do appear on the heap over TLS. The provider does not keep these copies, and the garbage collector reclaims
+them, but it does not wipe them: the bytes stay in memory until it is reused, so a heap dump, a core dump or swap
+can hold them. The canary tests show both sides: over plain HTTP
+the heap is clean, and over TLS it is not.
+
+Where a secret must never reach the heap, for example a key used for cryptography in native memory, read it
+through the [`mounted`](mounted.md) provider instead: the platform (Cloud Run, GKE, EKS) mounts it as a file, and the
+process needs no network code and no credential.
 
 ## Testing
 
@@ -108,7 +116,8 @@ provider makes, the OAuth refresh-token grant and the metadata server's token. T
 not-found, errors, create-on-write, replication, token refresh, both credential sources, chunked and large responses,
 JSON escapes, malformed responses, timeouts, TLS with host name verification, and endpoint and credential checks.
 `GoogleSecretManagerCanaryTest` runs the canary gate: the canary is the refresh token, the access token and the value
-at once, read and written back, and the child JVM's heap dump must not hold it.
+at once, read and written back, and over plain HTTP the child JVM's heap dump must not hold it. Over TLS the test
+asserts that it does, so a JDK that stops copying is noticed.
 
 `GoogleSecretManagerLiveTest` runs against a real project when `SECRETS_GOOGLE_TEST_PROJECT` is set, with
 `SECRETS_GOOGLE_TEST_CREDENTIALS_PATH` for an `authorized_user` file instead of Application Default Credentials, or
