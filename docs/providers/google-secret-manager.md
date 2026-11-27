@@ -111,7 +111,8 @@ JSON escapes, malformed responses, timeouts, TLS with host name verification, an
 at once, read and written back, and the child JVM's heap dump must not hold it.
 
 `GoogleSecretManagerLiveTest` runs against a real project when `SECRETS_GOOGLE_TEST_PROJECT` is set (with
-`SECRETS_GOOGLE_TEST_CREDENTIALS_PATH` for an `authorized_user` file instead of Application Default Credentials). It
+`SECRETS_GOOGLE_TEST_CREDENTIALS_PATH` for an `authorized_user` file instead of Application Default Credentials, or
+`SECRETS_GOOGLE_TEST_CREDENTIALS=metadata` for the metadata server only, on Google Cloud). It
 writes a text value and a 60 KiB binary value to the secret `secrets-client-live-test`, reads them back by version
 and as `Secret`, reads a missing secret, and afterwards destroys all enabled versions but the newest two (active
 versions are billed). It is not run in CI. It passes against Google with `authorized_user` credentials; the metadata

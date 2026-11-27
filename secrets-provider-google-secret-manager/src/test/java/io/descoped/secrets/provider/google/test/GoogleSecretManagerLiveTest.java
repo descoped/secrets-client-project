@@ -33,7 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /**
  * Against the real Google Secret Manager, only when {@code SECRETS_GOOGLE_TEST_PROJECT} names a project; not run in CI.
  * Credentials are the authorized_user file in {@code SECRETS_GOOGLE_TEST_CREDENTIALS_PATH}, or else Application
- * Default Credentials as the provider finds them. It adds versions to the secret {@code secrets-client-live-test},
+ * Default Credentials as the provider finds them; {@code SECRETS_GOOGLE_TEST_CREDENTIALS=metadata} uses only the
+ * metadata server (on Google Cloud, such as a Cloud Run job). It adds versions to the secret {@code secrets-client-live-test},
  * creating it with automatic replication if needed, and afterwards destroys all enabled versions but the newest
  * {@value #KEEP} (active versions are billed).
  */
@@ -50,6 +51,10 @@ class GoogleSecretManagerLiveTest {
         String credentialsPath = System.getenv("SECRETS_GOOGLE_TEST_CREDENTIALS_PATH");
         if (credentialsPath != null) {
             configuration.put("secrets.credentials-path", credentialsPath);
+        }
+        String credentials = System.getenv("SECRETS_GOOGLE_TEST_CREDENTIALS");
+        if (credentials != null && !credentials.isEmpty()) {
+            configuration.put("secrets.credentials", credentials);
         }
         return configuration;
     }
@@ -145,6 +150,9 @@ class GoogleSecretManagerLiveTest {
     }
 
     private static Path credentialsFile() {
+        if ("metadata".equals(System.getenv("SECRETS_GOOGLE_TEST_CREDENTIALS"))) {
+            return null;
+        }
         for (String variable : List.of("SECRETS_GOOGLE_TEST_CREDENTIALS_PATH", "GOOGLE_APPLICATION_CREDENTIALS")) {
             String value = System.getenv(variable);
             if (value != null && !value.isEmpty()) {
