@@ -114,9 +114,8 @@ That is why the client hands values over only as a `Secret`, in guarded memory (
 - Use the value inside `withSegment`, or with `withBytes`/`withChars`, whose heap copy is wiped when the callback
   returns. `withChars` decodes strict UTF-8: invalid UTF-8 is an error, never replaced with `?`.
 - A provider that reads files (safe-configuration, mounted) never puts the value on the Java heap on the way, and
-  neither does safe-configuration's `addVersion`. Google Secret Manager's own code keeps it off the heap too, but the
-  JDK's TLS makes heap copies while it decrypts and encrypts, which are reclaimed but not wiped
-  ([details](providers/google-secret-manager.md#memory-and-tls)).
+  neither does safe-configuration's `addVersion`. Google Secret Manager keeps it off the heap over the network too:
+  TLS goes through OpenSSL, not the JDK ([details](providers/google-secret-manager.md#memory-and-tls)).
 - A value that has to end up in a `String` (a library that only accepts strings) can be made one inside the callback:
   `secret.withChars(String::new)`. The `String` is then on the heap for as long as it lives, outside what this
   library can wipe.

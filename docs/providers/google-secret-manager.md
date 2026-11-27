@@ -25,6 +25,7 @@ Key | Description
 `secrets.metadata-endpoint` | the metadata server, default `http://metadata.google.internal`; `metadata.google.internal`, `169.254.169.254` or a loopback address
 `secrets.connect-timeout` | ISO-8601 duration, default `PT10S`
 `secrets.request-timeout` | ISO-8601 duration for a whole request, default `PT30S`
+`secrets.tls.ca-file` | a PEM file of the only certificates to trust, such as a private CA; the system's trusted certificates when absent
 `secrets.memory.guard`, `secrets.memory.lock` | the guarded memory; see [the API](../api.md#guarded-memory-secretmemory-and-secret)
 
 ```java
@@ -96,27 +97,31 @@ Each request is built in guarded memory (the access token in the `Authorization`
 the body) and written to the socket from there; each response is read into guarded memory, its JSON parsed in place
 and the value decoded from Base64 straight into the `Secret` that `read` returns.
 
-TLS is the JDK's `SSLEngine` (TLS 1.3 or 1.2, the default trust store, host name verification and SNI), and that is
-where the guarantee ends. The provider hands `SSLEngine` only direct buffers, but the JDK's TLS and cipher code copies
-the plaintext through heap arrays while it encrypts and decrypts. So the access token, the refresh token and the
-values do appear on the heap over TLS. The provider does not keep these copies, and the garbage collector reclaims
-them, but it does not wipe them: the bytes stay in memory until it is reused, so a heap dump, a core dump or swap
-can hold them. The canary tests show both sides: over plain HTTP
-the heap is clean, and over TLS it is not.
+TLS goes through the system's OpenSSL 3 (`libssl`), called through the Foreign Function & Memory API, not through
+the JDK's `SSLEngine`, whose TLS and cipher code copies plaintext through heap arrays. OpenSSL encrypts straight out
+of the guarded request and decrypts straight into the guarded response, so the access token, the refresh token and
+the values are never on the Java heap, over TLS too. The canary tests prove it over plain HTTP and over TLS.
 
-Where a secret must never reach the heap, for example a key used for cryptography in native memory, read it
-through the [`mounted`](mounted.md) provider instead: the platform (Cloud Run, GKE, EKS) mounts it as a file, and the
-process needs no network code and no credential.
+- TLS 1.3 or 1.2, with AES-GCM or ChaCha20-Poly1305 and ECDHE only; no renegotiation, no compression.
+- The server's certificate must chain to a trusted root and match the host name (or the IP address); SNI is sent
+  for host names. The trusted roots are the system's (OpenSSL's default locations), or, with `secrets.tls.ca-file`,
+  only the certificates in that PEM file. `javax.net.ssl.trustStore` does not apply.
+- OpenSSL 3 must be installed: `libssl.so.3` on Linux (Debian and Ubuntu: the `libssl3` package, which minimal and
+  distroless images may lack); on macOS, `brew install openssl@3`. Without it, a client with an https endpoint
+  cannot be created, and the error says so.
+- While a record is decrypted, its plaintext is in OpenSSL's own buffers: native memory, not the Java heap. OpenSSL
+  clears it once it is handed over and when the connection is freed (`SSL_OP_CLEANSE_PLAINTEXT`).
 
 ## Testing
 
 The tests run against `FakeGoogle`, a local server (http or https) that implements the Secret Manager REST calls this
 provider makes, the OAuth refresh-token grant and the metadata server's token. They cover reads, versions,
 not-found, errors, create-on-write, replication, token refresh, both credential sources, chunked and large responses,
-JSON escapes, malformed responses, timeouts, TLS with host name verification, and endpoint and credential checks.
+JSON escapes, malformed responses, timeouts, and endpoint and credential checks. Over TLS (`GoogleSecretManagerTlsTest`):
+reads and writes, a host name with SNI, and the refusal of a certificate for another name, for another IP address,
+signed by no trusted root, or expired, each before a byte of the request is sent.
 `GoogleSecretManagerCanaryTest` runs the canary gate: the canary is the refresh token, the access token and the value
-at once, read and written back, and over plain HTTP the child JVM's heap dump must not hold it. Over TLS the test
-asserts that it does, so a JDK that stops copying is noticed.
+at once, read and written back, and the child JVM's heap dump must not hold it, over plain HTTP and over TLS.
 
 `GoogleSecretManagerLiveTest` runs against a real project when `SECRETS_GOOGLE_TEST_PROJECT` is set, with
 `SECRETS_GOOGLE_TEST_CREDENTIALS_PATH` for an `authorized_user` file instead of Application Default Credentials, or

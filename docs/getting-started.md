@@ -83,6 +83,8 @@ try (SecretManagerClient client = SecretManagerClient.create(configuration);
 `read` keeps the value in guarded native memory, which needs native access: start the JVM with
 `--enable-native-access=io.descoped.secrets.api` (`--enable-native-access=ALL-UNNAMED` on the class path). The
 safe-configuration provider needs it to start at all. See [guarded memory](api.md#guarded-memory-secretmemory-and-secret).
+The Google provider also needs OpenSSL 3 for TLS: `libssl.so.3` on Linux (the `libssl3` package on Debian and
+Ubuntu), `brew install openssl@3` on macOS.
 
 On the module path, the application module `requires io.descoped.secrets.api` only; provider modules are found
 without being required. On the class path, providers are found through `META-INF/services`.
@@ -92,7 +94,7 @@ without being required. On the class path, providers are found through `META-INF
 Provider | Reads | Writes | Holds values as | Use it for
 ---|---|---|---|---
 `safe-configuration` | a local `key=value` file | yes, atomically, owner-only | guarded memory | local development and tests
-`google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | guarded memory, except copies the JDK's TLS makes ([details](providers/google-secret-manager.md#memory-and-tls)) | production on Google Cloud
+`google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | guarded memory; TLS through OpenSSL 3 | production on Google Cloud
 `mounted` | files the platform mounts (Cloud Run, Kubernetes, Secrets Store CSI) | no | guarded memory, read on every `read` | production where the platform mounts secrets: no credential in the process
 
 Every provider follows the same contract, so switching is a configuration change; see

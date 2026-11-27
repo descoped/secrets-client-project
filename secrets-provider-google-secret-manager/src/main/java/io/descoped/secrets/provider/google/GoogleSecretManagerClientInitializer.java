@@ -4,21 +4,21 @@ import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerClientInitializer;
 import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.api.SecretMemory;
+import io.descoped.secrets.api.tls.TlsContext;
 import io.descoped.service.provider.api.ProviderName;
 
-import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.GeneralSecurityException;
 import java.time.Duration;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
@@ -53,14 +53,19 @@ import java.util.regex.Pattern;
  *     address</td></tr>
  *     <tr><td>{@value #CONNECT_TIMEOUT_KEY}</td><td>ISO-8601 duration, default {@code PT10S}</td></tr>
  *     <tr><td>{@value #REQUEST_TIMEOUT_KEY}</td><td>ISO-8601 duration, default {@code PT30S}</td></tr>
+ *     <tr><td>{@value #CA_FILE_KEY}</td><td>a PEM file of the only certificates to trust, such as a private CA;
+ *     the system's trusted certificates (OpenSSL's default locations) when absent</td></tr>
  *     <tr><td>{@value io.descoped.secrets.api.SecretMemory#GUARD_KEY},
  *     {@value io.descoped.secrets.api.SecretMemory#LOCK_KEY}</td><td>the guarded memory, see
  *     {@link io.descoped.secrets.api.SecretMemory}</td></tr>
  * </table>
  *
- * <p>The access token is fetched on first use and replaced when it has less than three minutes left. TLS is the
- * JDK's ({@code SSLEngine}, TLS 1.3 or 1.2, the default trust store as configured when the client is created, host
- * name verification). The timeouts include looking the host name up; they are at most one hour.
+ * <p>The access token is fetched on first use and replaced when it has less than three minutes left. TLS goes
+ * through the system's OpenSSL 3 ({@code libssl}; Homebrew's {@code openssl@3} on macOS), not the JDK, so that
+ * nothing sent or received is on the Java heap: TLS 1.3 or 1.2 with AES-GCM or ChaCha20-Poly1305, the certificate
+ * verified against the trusted roots and the host, SNI. Without OpenSSL 3, a client with an https endpoint cannot
+ * be created. The timeouts
+ * include looking the host name up; they are at most one hour.
  *
  * <p>Versions are Secret Manager's: {@code latest} or a version number; {@code addVersion} returns the new number.
  * Secret names follow Secret Manager's rule: 1 to 255 letters, digits, {@code -} and {@code _}. Reading a name or
@@ -97,6 +102,9 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
 
     /** The configuration key for the request timeout. */
     public static final String REQUEST_TIMEOUT_KEY = "secrets.request-timeout";
+
+    /** The configuration key for a PEM file of the only certificates to trust, instead of the system's. */
+    public static final String CA_FILE_KEY = "secrets.tls.ca-file";
 
     /** The default API endpoint. */
     public static final String DEFAULT_ENDPOINT = "https://secretmanager.googleapis.com";
@@ -147,15 +155,7 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
                 configuration.getOrDefault(TOKEN_ENDPOINT_KEY, DEFAULT_TOKEN_ENDPOINT));
         URI metadataEndpoint = metadata(configuration.getOrDefault(METADATA_ENDPOINT_KEY,
                 DEFAULT_METADATA_ENDPOINT));
-        List<String> locations = Arrays.stream(configuration.getOrDefault(REPLICATION_KEY, "").split(","))
-                .map(String::strip)
-                .filter(s -> !s.isEmpty())
-                .toList();
-        for (String location : locations) {
-            if (!LOCATION.matcher(location).matches()) {
-                throw new IllegalArgumentException("Invalid location in '" + REPLICATION_KEY + "': " + location);
-            }
-        }
+        List<String> locations = locations(configuration);
         String mode = configuration.getOrDefault(CREDENTIALS_KEY, APPLICATION_DEFAULT);
         if (!mode.equals(APPLICATION_DEFAULT) && !mode.equals(METADATA)) {
             throw new IllegalArgumentException("Invalid '" + CREDENTIALS_KEY + "': " + mode
@@ -169,33 +169,63 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         Http.Timeouts timeouts = new Http.Timeouts(
                 duration(configuration, CONNECT_TIMEOUT_KEY, Duration.ofSeconds(10)),
                 duration(configuration, REQUEST_TIMEOUT_KEY, Duration.ofSeconds(30)));
-        SSLContext tls = tls();
-        SecretMemory memory = SecretMemory.create(configuration);
+        Path file = mode.equals(METADATA) ? null : credentialsFile(credentialsPath);
+        // OpenSSL only when something is reached over https: the metadata server and test servers are plain http.
+        boolean secure = isHttps(endpoint) || file != null && isHttps(tokenEndpoint);
+        TlsContext tls = secure ? tlsContext(configuration.get(CA_FILE_KEY)) : null;
         try {
-            Path file = mode.equals(METADATA) ? null : credentialsFile(credentialsPath);
-            AccessTokens.Source source = file == null
-                    ? new AccessTokens.MetadataServer(Http.Target.of(metadataEndpoint, tls), timeouts, memory)
-                    : AccessTokens.AuthorizedUser.load(file, Http.Target.of(tokenEndpoint, tls), timeouts, memory);
-            return new GoogleSecretManagerClient(Http.Target.of(endpoint, tls), projectId, locations, timeouts,
-                    memory, new AccessTokens(source));
+            SecretMemory memory = SecretMemory.create(configuration);
+            Http.Target tokens = Http.Target.of(file == null ? metadataEndpoint : tokenEndpoint, tls);
+            Function<SecretMemory, AccessTokens.Source> source = file == null
+                    ? m -> new AccessTokens.MetadataServer(tokens, timeouts, m)
+                    : m -> AccessTokens.AuthorizedUser.load(file, tokens, timeouts, m);
+            return client(memory, source, Http.Target.of(endpoint, tls), projectId, locations, timeouts, tls);
+        } catch (RuntimeException e) {
+            closeQuietly(tls);
+            throw e;
+        }
+    }
+
+    /** The client on {@code memory}, which is closed if the client cannot be created. */
+    private static GoogleSecretManagerClient client(SecretMemory memory,
+                                                    Function<SecretMemory, AccessTokens.Source> source,
+                                                    Http.Target api, String projectId, List<String> locations,
+                                                    Http.Timeouts timeouts, TlsContext tls) {
+        try {
+            return new GoogleSecretManagerClient(api, projectId, locations, timeouts, memory,
+                    new AccessTokens(source.apply(memory)), tls);
         } catch (RuntimeException e) {
             memory.close();
             throw e;
         }
     }
 
-    /**
-     * A TLS context of the client's own, with the JDK's default trust store as it is configured now
-     * ({@code javax.net.ssl.trustStore} and the like are read here, not once per JVM).
-     */
-    private static SSLContext tls() {
-        try {
-            SSLContext context = SSLContext.getInstance("TLS");
-            context.init(null, null, null);
-            return context;
-        } catch (GeneralSecurityException e) {
-            throw new SecretManagerException("TLS is not available", e);
+    private static List<String> locations(Map<String, String> configuration) {
+        List<String> locations = Arrays.stream(configuration.getOrDefault(REPLICATION_KEY, "").split(","))
+                .map(String::strip)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        for (String location : locations) {
+            if (!LOCATION.matcher(location).matches()) {
+                throw new IllegalArgumentException("Invalid location in '" + REPLICATION_KEY + "': " + location);
+            }
         }
+        return locations;
+    }
+
+    private static TlsContext tlsContext(String caFile) {
+        Path path = caFile == null ? null : Path.of(caFile);
+        return TlsContext.create(path);
+    }
+
+    private static void closeQuietly(TlsContext tls) {
+        if (tls != null) {
+            tls.close();
+        }
+    }
+
+    private static boolean isHttps(URI uri) {
+        return "https".equalsIgnoreCase(uri.getScheme());
     }
 
     /**
