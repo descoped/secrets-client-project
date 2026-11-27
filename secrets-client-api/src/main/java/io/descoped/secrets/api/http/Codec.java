@@ -1,4 +1,4 @@
-package io.descoped.secrets.provider.google;
+package io.descoped.secrets.api.http;
 
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
@@ -9,7 +9,7 @@ import java.util.zip.CRC32C;
  * CRC32C. Nothing here copies a byte to the Java heap; every method also works on heap segments, for values that are
  * not secret.
  */
-final class Codec {
+public final class Codec {
 
     private static final byte[] BASE64 =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".getBytes(
@@ -20,11 +20,16 @@ final class Codec {
     }
 
     /** A value that is not valid in its encoding. Never names the value. */
-    static final class MalformedException extends Exception {
+    public static final class MalformedException extends Exception {
         @java.io.Serial
         private static final long serialVersionUID = 1L;
 
-        MalformedException(String what) {
+        /**
+         * Creates the exception.
+         *
+         * @param what what is malformed, never the value
+         */
+        public MalformedException(String what) {
             super(what, null, false, false);
         }
     }
@@ -39,12 +44,25 @@ final class Codec {
 
     // Base64 (RFC 4648, standard alphabet, with padding)
 
-    static long base64EncodedLength(long length) {
+    /**
+     * The length of {@code length} bytes as Base64, with padding.
+     *
+     * @param length the number of bytes
+     * @return the number of Base64 characters
+     */
+    public static long base64EncodedLength(long length) {
         return (length + 2) / 3 * 4;
     }
 
-    /** Writes {@code src} as Base64 into {@code dst} at {@code offset}; returns the offset after it. */
-    static long base64Encode(MemorySegment src, MemorySegment dst, long offset) {
+    /**
+     * Writes {@code src} as Base64 into {@code dst} at {@code offset}.
+     *
+     * @param src    the bytes
+     * @param dst    where to write, with room for {@link #base64EncodedLength(long)} characters
+     * @param offset where in {@code dst} to start
+     * @return the offset after what was written
+     */
+    public static long base64Encode(MemorySegment src, MemorySegment dst, long offset) {
         long n = src.byteSize();
         long out = offset;
         long i = 0;
@@ -88,9 +106,11 @@ final class Codec {
     /**
      * The number of bytes {@code src} decodes to: Base64 with or without padding, no line breaks.
      *
+     * @param src Base64 text
+     * @return the number of bytes
      * @throws MalformedException if it is not Base64
      */
-    static long base64DecodedLength(MemorySegment src) throws MalformedException {
+    public static long base64DecodedLength(MemorySegment src) throws MalformedException {
         long n = src.byteSize();
         long padding = 0;
         if (n > 0 && get(src, n - 1) == '=') {
@@ -112,8 +132,13 @@ final class Codec {
         return data / 4 * 3 + (rest == 0 ? 0 : rest - 1);
     }
 
-    /** Decodes {@code src}, checked by {@link #base64DecodedLength(MemorySegment)}, into {@code dst}. */
-    static void base64Decode(MemorySegment src, MemorySegment dst) {
+    /**
+     * Decodes {@code src}, checked by {@link #base64DecodedLength(MemorySegment)}, into {@code dst}.
+     *
+     * @param src Base64 text
+     * @param dst where to write, of the decoded length
+     */
+    public static void base64Decode(MemorySegment src, MemorySegment dst) {
         long out = 0;
         int bits = 0;
         int count = 0;
@@ -145,19 +170,24 @@ final class Codec {
     /**
      * The length in UTF-8 bytes of the JSON string content {@code src} (between the quotes) once unescaped.
      *
+     * @param src the string's content, escaped
+     * @return the number of bytes
      * @throws MalformedException if an escape is invalid
      */
-    static long unescapedLength(MemorySegment src) throws MalformedException {
+    public static long unescapedLength(MemorySegment src) throws MalformedException {
         return unescape(src, null);
     }
 
     /**
      * Unescapes the JSON string content {@code src} into {@code dst} (as UTF-8), or only measures it when {@code dst}
-     * is {@code null}; returns the length.
+     * is {@code null}.
      *
+     * @param src the string's content, escaped
+     * @param dst where to write, of {@link #unescapedLength(MemorySegment)}, or {@code null}
+     * @return the number of bytes
      * @throws MalformedException if an escape is invalid
      */
-    static long unescape(MemorySegment src, MemorySegment dst) throws MalformedException {
+    public static long unescape(MemorySegment src, MemorySegment dst) throws MalformedException {
         return new Unescaper(src, dst).run();
     }
 
@@ -296,8 +326,13 @@ final class Codec {
                 || b == '_' || b == '~';
     }
 
-    /** The length of {@code src} percent-encoded. */
-    static long formEncodedLength(MemorySegment src) {
+    /**
+     * The length of {@code src} percent-encoded.
+     *
+     * @param src the bytes
+     * @return the number of characters
+     */
+    public static long formEncodedLength(MemorySegment src) {
         long length = 0;
         for (long i = 0; i < src.byteSize(); i++) {
             length += unreserved(get(src, i)) ? 1 : 3;
@@ -305,8 +340,15 @@ final class Codec {
         return length;
     }
 
-    /** Writes {@code src} percent-encoded into {@code dst} at {@code offset}; returns the offset after it. */
-    static long formEncode(MemorySegment src, MemorySegment dst, long offset) {
+    /**
+     * Writes {@code src} percent-encoded into {@code dst} at {@code offset}.
+     *
+     * @param src    the bytes
+     * @param dst    where to write, with room for {@link #formEncodedLength(MemorySegment)} characters
+     * @param offset where in {@code dst} to start
+     * @return the offset after what was written
+     */
+    public static long formEncode(MemorySegment src, MemorySegment dst, long offset) {
         long out = offset;
         for (long i = 0; i < src.byteSize(); i++) {
             byte b = get(src, i);
@@ -321,8 +363,13 @@ final class Codec {
         return out;
     }
 
-    /** The CRC32C of {@code value}, read in place. */
-    static long crc32c(MemorySegment value) {
+    /**
+     * The CRC32C of {@code value}, read in place.
+     *
+     * @param value the bytes
+     * @return the checksum
+     */
+    public static long crc32c(MemorySegment value) {
         CRC32C crc = new CRC32C();
         if (value.isNative()) {
             crc.update(value.asByteBuffer());
@@ -332,14 +379,28 @@ final class Codec {
         return crc.getValue();
     }
 
-    /** Copies bytes that are not secret into {@code dst} at {@code offset}; returns the offset after them. */
-    static long putBytes(MemorySegment dst, long offset, byte[] bytes) {
+    /**
+     * Copies bytes that are not secret into {@code dst} at {@code offset}.
+     *
+     * @param dst    where to write
+     * @param offset where in {@code dst} to start
+     * @param bytes  the bytes, not secret
+     * @return the offset after them
+     */
+    public static long putBytes(MemorySegment dst, long offset, byte[] bytes) {
         MemorySegment.copy(bytes, 0, dst, ValueLayout.JAVA_BYTE, offset, bytes.length);
         return offset + bytes.length;
     }
 
-    /** Copies {@code src} into {@code dst} at {@code offset}; returns the offset after it. */
-    static long putSegment(MemorySegment dst, long offset, MemorySegment src) {
+    /**
+     * Copies {@code src} into {@code dst} at {@code offset}.
+     *
+     * @param dst    where to write
+     * @param offset where in {@code dst} to start
+     * @param src    the bytes
+     * @return the offset after them
+     */
+    public static long putSegment(MemorySegment dst, long offset, MemorySegment src) {
         MemorySegment.copy(src, 0, dst, offset, src.byteSize());
         return offset + src.byteSize();
     }

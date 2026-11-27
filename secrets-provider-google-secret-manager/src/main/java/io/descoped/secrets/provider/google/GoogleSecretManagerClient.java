@@ -1,5 +1,8 @@
 package io.descoped.secrets.provider.google;
 
+import io.descoped.secrets.api.http.Codec;
+import io.descoped.secrets.api.http.Http;
+import io.descoped.secrets.api.http.Json;
 import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;

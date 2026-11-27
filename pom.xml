@@ -24,10 +24,13 @@
         <module>secrets-provider-mounted</module>
         <!-- Test support for the modules above; never published. -->
         <module>secrets-test-support</module>
+        <!-- One coverage report over every module, for SonarCloud; never published. -->
+        <module>secrets-coverage</module>
     </modules>
 
     <properties>
         <java.version>25</java.version>
+        <jacoco.version>0.8.16</jacoco.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -188,7 +191,7 @@
                     <plugin>
                         <groupId>org.jacoco</groupId>
                         <artifactId>jacoco-maven-plugin</artifactId>
-                        <version>0.8.16</version>
+                        <version>${jacoco.version}</version>
                         <executions>
                             <execution>
                                 <id>prepare-agent</id>
@@ -209,14 +212,15 @@
             </build>
         </profile>
 
-        <!-- One SonarCloud project for the whole reactor; each module reports its own JaCoCo XML. -->
+        <!-- One SonarCloud project for the whole reactor, with one JaCoCo report over every module (secrets-coverage):
+             the providers' tests cover the API module's TLS and HTTP code. -->
         <profile>
             <id>sonar</id>
             <properties>
                 <sonar.host.url>https://sonarcloud.io</sonar.host.url>
                 <sonar.organization>descoped</sonar.organization>
                 <sonar.projectKey>descoped_secrets-client-project</sonar.projectKey>
-                <sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+                <sonar.coverage.jacoco.xmlReportPaths>${maven.multiModuleProjectDirectory}/secrets-coverage/target/site/jacoco-aggregate/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
             </properties>
             <build>
                 <plugins>

@@ -1,4 +1,4 @@
-package io.descoped.secrets.provider.google;
+package io.descoped.secrets.api.http;
 
 import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretMemory;
@@ -20,7 +20,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * The HTTP/1.1 this provider needs, on guarded memory: a request is built in a {@link Secret} (it may carry the access
+ * The HTTP/1.1 the providers need, on guarded memory: a request is built in a {@link Secret} (it may carry the access
  * token and a value), written from there, and the response is read into guarded memory and handed back as a
  * {@link Secret} body. One connection per request ({@code Connection: close}); bodies framed by
  * {@code Content-Length} or chunked encoding.
@@ -28,9 +28,9 @@ import java.util.regex.Pattern;
  * <p>Guarded memory is open for writing only to move bytes that have already arrived: the wait for the server
  * happens with none open ({@link Connection#awaitData(long)}).
  */
-final class Http {
+public final class Http {
 
-    /** The largest response read: Secret Manager values are at most 64 KiB, about 88 KiB as Base64 in JSON. */
+    /** The largest response read: provider values are at most 64 KiB, about 88 KiB as Base64 in JSON. */
     static final long MAX_RESPONSE = 4L * 1024 * 1024;
 
     private static final long CHUNK = 32L * 1024;
@@ -50,10 +50,16 @@ final class Http {
      * @param port the port
      * @param path the base path, without a trailing {@code /}
      */
-    record Target(TlsContext tls, String host, int port, String path) {
+    public record Target(TlsContext tls, String host, int port, String path) {
 
-        /** The target of an http or https URI; {@code tls} is used for https. */
-        static Target of(URI uri, TlsContext tls) {
+        /**
+         * The target of an http or https URI.
+         *
+         * @param uri the URI
+         * @param tls the TLS context, used for https only
+         * @return the target
+         */
+        public static Target of(URI uri, TlsContext tls) {
             boolean secure = "https".equalsIgnoreCase(uri.getScheme());
             String host = uri.getHost();
             if (host.startsWith("[") && host.endsWith("]")) {
@@ -70,19 +76,34 @@ final class Http {
             return new Target(secure ? tls : null, host, port, path);
         }
 
-        String hostHeader() {
+        /**
+         * The {@code Host} header's value: the host, and the port unless it is the scheme's default.
+         *
+         * @return the value
+         */
+        public String hostHeader() {
             String name = host.indexOf(':') >= 0 ? "[" + host + "]" : host;
             int defaultPort = tls == null ? 80 : 443;
             return port == defaultPort ? name : name + ":" + port;
         }
     }
 
-    /** How long to wait: for the connection, and for the whole exchange. */
-    record Timeouts(Duration connect, Duration request) {
+    /**
+     * How long to wait: for the connection, and for the whole exchange.
+     *
+     * @param connect for the connection, including the host name lookup
+     * @param request for the whole exchange
+     */
+    public record Timeouts(Duration connect, Duration request) {
     }
 
-    /** A response; its body is in guarded memory. */
-    record Response(int status, Secret body) implements AutoCloseable {
+    /**
+     * A response; its body is in guarded memory.
+     *
+     * @param status the HTTP status code
+     * @param body   the body, decoded from chunks if it came in chunks; closed with the response
+     */
+    public record Response(int status, Secret body) implements AutoCloseable {
         @Override
         public void close() {
             body.close();
@@ -92,12 +113,16 @@ final class Http {
     /**
      * Builds a request in guarded memory.
      *
+     * @param memory  where to build it
+     * @param target  the server
+     * @param method  the HTTP method
      * @param path    the path and query, from the target's base path on; not secret
      * @param headers further header lines, without line endings; not secret
      * @param bearer  the access token for {@code Authorization: Bearer}, or {@code null}
      * @param body    the body, or {@code null} for none
+     * @return the request, for {@link #exchange}; the caller closes it
      */
-    static Secret request(SecretMemory memory, Target target, String method, String path, List<String> headers,
+    public static Secret request(SecretMemory memory, Target target, String method, String path, List<String> headers,
                           MemorySegment bearer, MemorySegment body) {
         StringBuilder head = new StringBuilder()
                 .append(method).append(' ').append(target.path()).append(path).append(" HTTP/1.1\r\n")
@@ -131,9 +156,14 @@ final class Http {
     /**
      * Sends {@code request} to {@code target} and reads the response into {@code memory}.
      *
+     * @param target   the server
+     * @param request  the request, as {@link #request} built it
+     * @param timeouts how long to wait
+     * @param memory   where to read the response
+     * @return the response, which the caller closes
      * @throws IOException if the exchange fails or times out, or the response is not HTTP/1.1 this reader accepts
      */
-    static Response exchange(Target target, Secret request, Timeouts timeouts, SecretMemory memory)
+    public static Response exchange(Target target, Secret request, Timeouts timeouts, SecretMemory memory)
             throws IOException {
         long deadline = System.nanoTime() + timeouts.request().toNanos();
         try (Connection connection = Connection.open(target.host(), target.port(), target.tls(),

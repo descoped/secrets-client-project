@@ -1,7 +1,7 @@
 # Provider: google-secret-manager
 
 [Google Secret Manager](https://cloud.google.com/secret-manager), read and write, through its REST API. The provider
-for production. It has its own small HTTP/1.1 client, JSON reader and Base64 codec, all working on guarded memory:
+for production. It uses the library's own small HTTP/1.1 client, JSON reader and Base64 codec, all working on guarded memory:
 values, the access token and the refresh token are never on the Java heap, from the network or the file to the
 caller. No gRPC, no Google Cloud client library, no google-auth, no Jackson.
 

@@ -1,4 +1,4 @@
-package io.descoped.secrets.provider.google;
+package io.descoped.secrets.api.http;
 
 import io.descoped.secrets.api.tls.TlsContext;
 import io.descoped.secrets.api.tls.TlsSession;
