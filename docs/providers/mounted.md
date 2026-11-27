@@ -94,5 +94,7 @@ Manager, then compares the two. Its settings:
 - `SECRETS_MOUNTED_TEST_SECRET`: the secret, default `secrets-client-live-test`;
 - the Google live test's project and credentials variables.
 
-It passes on Cloud Run (second-generation) with a Secret Manager secret volume. Its first run there found that the
-kernel cannot fill `memfd_secret` pages from such a volume (`EFAULT`), which `SecretMemory.read` now handles.
+It passes on Cloud Run (second-generation execution environment) with a Secret Manager secret volume
+([issue #15](https://github.com/descoped/secrets-client-project/issues/15)). Its first run there found that the
+kernel cannot fill `memfd_secret` pages from such a volume (`EFAULT`), which `SecretMemory.read` handles by reading
+through ordinary pages.
