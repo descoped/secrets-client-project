@@ -44,7 +44,8 @@ class GoogleSecretManagerLiveTest {
     private static final String SECRET = "secrets-client-live-test";
     private static final int KEEP = 2;
 
-    private static Map<String, String> configuration() {
+    /** The configuration of a client of the live project, with the credentials the environment names. */
+    static Map<String, String> configuration() {
         Map<String, String> configuration = new HashMap<>(Map.of(
                 "secrets.provider", "google-secret-manager",
                 "secrets.project-id", System.getenv("SECRETS_GOOGLE_TEST_PROJECT")));
