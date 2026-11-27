@@ -1,3 +1,9 @@
+---
+title: Roadmap
+description: What is planned for the secrets client but not done yet.
+order: 12
+---
+
 # Roadmap
 
 Work that is planned but not done. Each item keeps the library's promise: no secret or credential on the Java heap,

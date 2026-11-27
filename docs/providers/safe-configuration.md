@@ -1,9 +1,16 @@
+---
+title: Local file
+description: The safe-configuration provider reads and writes a local key=value file in guarded memory, for development and tests.
+order: 4
+---
+
 # Provider: safe-configuration
 
 Secrets in a local file, read, parsed, held and written in guarded memory: no value is ever on the Java heap unless
 the caller asks for a heap copy. Reads and writes. **For local development and tests, not for production**: a file
 of secrets on disk is only as safe as the disk and its permissions. In production, use
-[Google Secret Manager](google-secret-manager.md).
+[Google Secret Manager](google-secret-manager.md), [AWS Secrets Manager](aws-secrets-manager.md), or the files the
+platform [mounts](mounted.md).
 
 - Maven: `io.descoped.secrets:secrets-provider-safe-configuration`, scope `runtime`
 - Provider name: `safe-configuration`

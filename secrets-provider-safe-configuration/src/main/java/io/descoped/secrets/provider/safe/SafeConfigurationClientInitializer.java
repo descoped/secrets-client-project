@@ -11,7 +11,7 @@ import java.util.Set;
 /**
  * The provider {@code safe-configuration}: secrets in a local file, for local development and tests. It is not meant
  * for production: a file of secrets on disk is only as safe as the disk and its permissions. Use the Google Secret
- * Manager provider there.
+ * Manager, AWS Secrets Manager or mounted provider there.
  *
  * <p>The file is read, parsed and rewritten in guarded memory ({@link io.descoped.secrets.api.SecretMemory}), and
  * every value is held there: no value is on the Java heap unless the caller asks for a heap copy (the hand-over

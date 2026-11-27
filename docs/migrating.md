@@ -1,3 +1,9 @@
+---
+title: Migrating
+description: Move to 4.0 from 3.x, from 2.x, or from the 0.x versions of the secrets client.
+order: 11
+---
+
 # Migrating
 
 ## Migrating from 3.x to 4.0

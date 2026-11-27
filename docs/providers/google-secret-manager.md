@@ -1,3 +1,9 @@
+---
+title: Google Secret Manager
+description: The google-secret-manager provider reads and writes Google Secret Manager on guarded memory, with TLS through OpenSSL and the metadata server's credentials.
+order: 1
+---
+
 # Provider: google-secret-manager
 
 [Google Secret Manager](https://cloud.google.com/secret-manager), read and write, through its REST API. The provider
@@ -80,7 +86,8 @@ A missing permission is a `SecretManagerException` naming `PERMISSION_DENIED`.
 - Secrets are global resources (`projects/<project>/secrets/<name>`), replicated as configured. Regional secrets
   (`projects/<project>/locations/<location>/secrets/<name>`, served by the regional endpoints) are not supported.
 - Values travel with a CRC32C checksum, both ways. A response whose checksum does not match is an error.
-- One connection per request (`Connection: close`). Responses are read up to 4 MiB; a value is at most 64 KiB.
+- One connection per request (`Connection: close`). Responses are read up to 4 MiB. Google Secret Manager limits a value to 64 KiB;
+  a larger one is refused by Google, not checked by the provider.
 
 Response | Result
 ---|---

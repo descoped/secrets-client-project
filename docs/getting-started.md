@@ -1,9 +1,16 @@
+---
+title: Getting started
+description: Add the secrets client to a Java 25 project, start the JVM with native access, and read a first secret.
+order: 2
+---
+
 # Getting started
 
 ## Dependencies
 
 All modules share one version, aligned by the BOM `secrets-client-bom`. Import it, compile against the API, and add
-the providers you use at runtime:
+the providers you use at runtime. The API these pages describe is 4.0, which is published as `4.0.0-SNAPSHOT` from
+the SNAPSHOT repository below; 3.0.0 on Maven Central has the earlier API ([what changed](migrating.md)).
 
 ```xml
 <dependencyManagement>
@@ -11,7 +18,7 @@ the providers you use at runtime:
         <dependency>
             <groupId>io.descoped.secrets</groupId>
             <artifactId>secrets-client-bom</artifactId>
-            <version>3.0.0</version>
+            <version>4.0.0-SNAPSHOT</version>
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -31,8 +38,8 @@ the providers you use at runtime:
 </dependencies>
 ```
 
-Gradle: `implementation(platform("io.descoped.secrets:secrets-client-bom:3.0.0"))`, then the modules without a
-version.
+Gradle: `implementation(platform("io.descoped.secrets:secrets-client-bom:4.0.0-SNAPSHOT"))`, then the modules
+without a version.
 
 The BOM manages the secrets modules only. The modules have no third-party dependency but
 [service-provider-api](https://github.com/descoped/service-provider-api), which comes through the API module.
@@ -85,7 +92,8 @@ try (SecretManagerClient client = SecretManagerClient.create(configuration);
 `--enable-native-access=io.descoped.secrets.api` (`--enable-native-access=ALL-UNNAMED` on the class path). Without
 it, no provider starts. See [guarded memory](api.md#guarded-memory-secretmemory-and-secret).
 The Google and AWS providers also need OpenSSL 3, for TLS and AWS's request signing: `libssl.so.3` on Linux (the
-`libssl3` package on Debian and Ubuntu), `brew install openssl@3` on macOS. It runs on Linux and macOS. Secrets are
+`libssl3` package on Debian and Ubuntu), `brew install openssl@3` on macOS (only Homebrew's locations are searched
+there). It runs on Linux and macOS. Secrets are
 locked in memory, so a container needs a locked-memory limit that fits them; Cloud Run, ECS on Fargate and Docker on
 EC2 work with their defaults. [What the platform must provide](security.md#what-the-platform-must-provide) has the
 details.
