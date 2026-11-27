@@ -221,6 +221,10 @@
                 <sonar.organization>descoped</sonar.organization>
                 <sonar.projectKey>descoped_secrets-client-project</sonar.projectKey>
                 <sonar.coverage.jacoco.xmlReportPaths>${maven.multiModuleProjectDirectory}/secrets-coverage/target/site/jacoco-aggregate/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+                <!-- The OpenSSL binding: every TLS and crypto test runs through it, but its other branches are loading
+                     on the other OS (CI is Linux), a missing or old OpenSSL, and native calls that throw, which no
+                     single environment reaches. -->
+                <sonar.coverage.exclusions>**/io/descoped/secrets/api/internal/OpenSsl.java</sonar.coverage.exclusions>
             </properties>
             <build>
                 <plugins>
