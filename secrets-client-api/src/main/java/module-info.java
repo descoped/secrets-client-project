@@ -14,7 +14,8 @@ module io.descoped.secrets.api {
     // TLS through OpenSSL, for the providers that talk to a server; not part of the API.
     exports io.descoped.secrets.api.tls to io.descoped.secrets.provider.google, io.descoped.secrets.api.test;
     exports io.descoped.secrets.api.http to io.descoped.secrets.provider.google;
-    // SHA-256 and HMAC-SHA256 through OpenSSL, for request signing; the harness's tests prove it keeps keys off the heap.
+    // SHA-256 and HMAC-SHA256 through OpenSSL, for request signing; the harness's tests prove that keys stay off the
+    // heap.
     exports io.descoped.secrets.api.crypto to io.descoped.secrets.api.test, io.descoped.secrets.test.support.test;
 
     uses io.descoped.secrets.api.SecretManagerClientInitializer;

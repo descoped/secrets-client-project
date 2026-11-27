@@ -13,6 +13,7 @@ import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Random;
 
@@ -57,7 +58,7 @@ class Sha256Test {
         assertEquals(expected, digest(ascii(message)));
     }
 
-    /** RFC 4231 test cases 1 to 4, 6 and 7 (case 5 is a truncated output). */
+    /** RFC 4231 test cases 1 to 4 (case 5 is a truncated output; 6 and 7 are below). */
     @ParameterizedTest
     @CsvSource({
             "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b, 4869205468657265, "
@@ -78,7 +79,7 @@ class Sha256Test {
     @Test
     void aKeyLongerThanABlockMatchesRfc4231() {
         byte[] key = new byte[131];
-        java.util.Arrays.fill(key, (byte) 0xaa);
+        Arrays.fill(key, (byte) 0xaa);
         assertEquals("60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54",
                 hmac(key, ascii("Test Using Larger Than Block-Size Key - Hash Key First")));
         assertEquals("9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2",
@@ -110,7 +111,22 @@ class Sha256Test {
         assertEquals(hmac(ascii("key"), ascii("message")), HEX.formatHex(out));
         byte[] digest = new byte[Sha256.LENGTH + 8];
         Sha256.digest(MemorySegment.ofArray(ascii("abc")), MemorySegment.ofArray(digest));
-        assertArrayEquals(HEX.parseHex(digest(ascii("abc"))), java.util.Arrays.copyOf(digest, Sha256.LENGTH));
+        assertArrayEquals(HEX.parseHex(digest(ascii("abc"))), Arrays.copyOf(digest, Sha256.LENGTH));
+    }
+
+    /** Native segments take the call that lets the garbage collector run; heap ones the critical call. */
+    @Test
+    void nativeAndHeapSegmentsGiveTheSameResult() {
+        byte[] key = ascii("key");
+        byte[] message = ascii("message");
+        byte[] heap = new byte[Sha256.LENGTH];
+        Sha256.hmac(MemorySegment.ofArray(key), MemorySegment.ofArray(message), MemorySegment.ofArray(heap));
+        assertEquals(hmac(key, message), HEX.formatHex(heap));
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(Sha256.LENGTH);
+            Sha256.digest(MemorySegment.ofArray(message), out);
+            assertEquals(digest(message), HEX.formatHex(out.toArray(ValueLayout.JAVA_BYTE)));
+        }
     }
 
     @Test

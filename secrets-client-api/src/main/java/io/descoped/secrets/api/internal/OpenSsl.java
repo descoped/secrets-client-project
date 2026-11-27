@@ -19,8 +19,9 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**
- * The OpenSSL 3 calls TLS and the digests need, through the Foreign Function &amp; Memory API, from the system's {@code libssl} and
- * {@code libcrypto}: {@code libssl.so.3} on Linux, Homebrew's {@code openssl@3} on macOS. Nothing is bundled.
+ * The OpenSSL 3 calls TLS and the digests need, through the Foreign Function &amp; Memory API, from the system's
+ * {@code libssl} and {@code libcrypto}: {@code libssl.so.3} on Linux, Homebrew's {@code openssl@3} on macOS. Nothing
+ * is bundled.
  *
  * <p>OpenSSL's error queue is per thread. A virtual thread can move to another carrier between two calls, so an
  * error read from the queue may be missing; it is used for messages only, and a failure is reported either way.
@@ -85,6 +86,9 @@ public final class OpenSsl {
     public final MethodHandle evpSha256;
     public final MethodHandle evpDigest;
     public final MethodHandle hmac;
+    /** {@link #evpDigest} and {@link #hmac} as critical calls, which may be given heap segments. */
+    public final MethodHandle evpDigestCritical;
+    public final MethodHandle hmacCritical;
     public final MethodHandle errGetError;
     public final MethodHandle errErrorStringN;
     public final MethodHandle errClearError;
@@ -119,7 +123,8 @@ public final class OpenSsl {
         MethodHandle versionNum = b.bind("OpenSSL_version_num", FunctionDescriptor.of(JAVA_LONG));
         long version = call(() -> (long) versionNum.invokeExact());
         if (Long.compareUnsigned(version, OPENSSL_3) < 0) {
-            throw new SecretManagerException("TLS and request signing need OpenSSL 3, found version 0x" + Long.toHexString(version));
+            throw new SecretManagerException("TLS and request signing need OpenSSL 3, found version 0x"
+                    + Long.toHexString(version));
         }
         tlsClientMethod = b.bind("TLS_client_method", FunctionDescriptor.of(ADDRESS));
         ctxNew = b.bind("SSL_CTX_new", FunctionDescriptor.of(ADDRESS, ADDRESS));
@@ -157,12 +162,16 @@ public final class OpenSsl {
         sslGet0PeerCertificate = b.bind("SSL_get0_peer_certificate", FunctionDescriptor.of(ADDRESS, ADDRESS));
         sslShutdown = b.bind("SSL_shutdown", FunctionDescriptor.of(JAVA_INT, ADDRESS));
         evpSha256 = b.bind("EVP_sha256", FunctionDescriptor.of(ADDRESS));
-        // Short, never blocking and never calling back: critical, so that inputs that are not secret may be on the
-        // heap.
-        evpDigest = b.critical("EVP_Digest",
-                FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
-        hmac = b.critical("HMAC",
-                FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS, JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS));
+        FunctionDescriptor digest = FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS,
+                ADDRESS);
+        FunctionDescriptor mac = FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS, JAVA_INT, ADDRESS, JAVA_LONG,
+                ADDRESS, ADDRESS);
+        evpDigest = b.bind("EVP_Digest", digest);
+        hmac = b.bind("HMAC", mac);
+        // Never blocking and never calling back: critical, so that inputs that are not secret may be on the heap.
+        // A critical call holds off the garbage collector until it returns, so it is used only for heap inputs.
+        evpDigestCritical = b.critical("EVP_Digest", digest);
+        hmacCritical = b.critical("HMAC", mac);
         errGetError = b.bind("ERR_get_error", FunctionDescriptor.of(JAVA_LONG));
         errErrorStringN = b.bind("ERR_error_string_n", FunctionDescriptor.ofVoid(JAVA_LONG, ADDRESS, JAVA_LONG));
         errClearError = b.bind("ERR_clear_error", FunctionDescriptor.ofVoid());
@@ -185,8 +194,8 @@ public final class OpenSsl {
             throw missing(tried, "install it with 'brew install openssl@3'");
         }
         if (!os.startsWith("linux")) {
-            throw new SecretManagerException("OpenSSL (TLS and request signing) is supported on Linux and macOS, not on "
-                    + System.getProperty("os.name"));
+            throw new SecretManagerException("OpenSSL (TLS and request signing) is supported on Linux and macOS,"
+                    + " not on " + System.getProperty("os.name"));
         }
         tried.add("libssl.so.3");
         try {
@@ -198,8 +207,8 @@ public final class OpenSsl {
     }
 
     private static SecretManagerException missing(List<String> tried, String advice) {
-        return new SecretManagerException("TLS and request signing need OpenSSL 3 (libssl), which was not found (tried " + tried + "); "
-                + advice);
+        return new SecretManagerException("TLS and request signing need OpenSSL 3 (libssl), which was not found"
+                + " (tried " + tried + "); " + advice);
     }
 
     /** The messages in this thread's OpenSSL error queue, which is emptied; "no details" if it is empty. */

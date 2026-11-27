@@ -4,6 +4,7 @@ import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.api.internal.OpenSsl;
 
 import java.lang.foreign.MemorySegment;
+import java.lang.invoke.MethodHandle;
 import java.util.Objects;
 
 import static io.descoped.secrets.api.internal.OpenSsl.call;
@@ -14,7 +15,9 @@ import static io.descoped.secrets.api.internal.OpenSsl.call;
  * clears. The JDK's {@code Mac} copies the key into a heap array ({@code SecretKeySpec}), and {@code MessageDigest}
  * buffers the message through heap arrays, so neither is used for secrets.
  *
- * <p>Inputs and outputs may be native or heap segments; secrets belong in native (guarded) memory. Thread-safe.
+ * <p>Inputs and outputs may be native or heap segments; secrets belong in native (guarded) memory. With a heap
+ * segment, the call holds off the garbage collector until it returns, so heap inputs should be small (a date, a
+ * region, a request's head). Thread-safe.
  */
 public final class Sha256 {
 
@@ -38,7 +41,8 @@ public final class Sha256 {
         ssl.clearErrors();
         MemorySegment md = call(() -> (MemorySegment) ssl.evpSha256.invokeExact());
         long length = message.byteSize();
-        int ok = call(() -> (int) ssl.evpDigest.invokeExact(message, length, out, MemorySegment.NULL, md,
+        MethodHandle evpDigest = isNative(message, out) ? ssl.evpDigest : ssl.evpDigestCritical;
+        int ok = call(() -> (int) evpDigest.invokeExact(message, length, out, MemorySegment.NULL, md,
                 MemorySegment.NULL));
         if (ok != 1) {
             throw new SecretManagerException("SHA-256 failed: " + ssl.errors());
@@ -51,22 +55,36 @@ public final class Sha256 {
      * @param key     the key, typically in guarded memory
      * @param message the bytes to authenticate
      * @param out     where to write the result, at least {@link #LENGTH} bytes
-     * @throws SecretManagerException if OpenSSL 3 is not found, or it fails
+     * @throws IllegalArgumentException if the key is 2 GiB or longer
+     * @throws SecretManagerException   if OpenSSL 3 is not found, or it fails
      */
     public static void hmac(MemorySegment key, MemorySegment message, MemorySegment out) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(message, "message");
         checkOut(out);
-        int keyLength = Math.toIntExact(key.byteSize());
+        if (key.byteSize() > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("An HMAC key is at most " + Integer.MAX_VALUE + " bytes");
+        }
+        int keyLength = (int) key.byteSize();
         OpenSsl ssl = OpenSsl.get();
         ssl.clearErrors();
         MemorySegment md = call(() -> (MemorySegment) ssl.evpSha256.invokeExact());
         long length = message.byteSize();
-        MemorySegment result = call(() -> (MemorySegment) ssl.hmac.invokeExact(md, key, keyLength, message, length,
-                out, MemorySegment.NULL));
+        MethodHandle hmac = isNative(key, message, out) ? ssl.hmac : ssl.hmacCritical;
+        MemorySegment result = call(() -> (MemorySegment) hmac.invokeExact(md, key, keyLength, message, length, out,
+                MemorySegment.NULL));
         if (result.equals(MemorySegment.NULL)) {
             throw new SecretManagerException("HMAC-SHA256 failed: " + ssl.errors());
         }
+    }
+
+    private static boolean isNative(MemorySegment... segments) {
+        for (MemorySegment segment : segments) {
+            if (!segment.isNative()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void checkOut(MemorySegment out) {
