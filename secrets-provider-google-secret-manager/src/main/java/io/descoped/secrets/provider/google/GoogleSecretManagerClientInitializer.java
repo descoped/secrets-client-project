@@ -18,6 +18,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
@@ -174,9 +175,11 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         TlsContext tls = secure ? tlsContext(configuration.get(CA_FILE_KEY)) : null;
         try {
             SecretMemory memory = SecretMemory.create(configuration);
-            Http.Target tokens = file == null ? Http.Target.of(metadataEndpoint, tls)
-                    : Http.Target.of(tokenEndpoint, tls);
-            return client(memory, file, tokens, Http.Target.of(endpoint, tls), projectId, locations, timeouts, tls);
+            Http.Target tokens = Http.Target.of(file == null ? metadataEndpoint : tokenEndpoint, tls);
+            Function<SecretMemory, AccessTokens.Source> source = file == null
+                    ? m -> new AccessTokens.MetadataServer(tokens, timeouts, m)
+                    : m -> AccessTokens.AuthorizedUser.load(file, tokens, timeouts, m);
+            return client(memory, source, Http.Target.of(endpoint, tls), projectId, locations, timeouts, tls);
         } catch (RuntimeException e) {
             closeQuietly(tls);
             throw e;
@@ -184,15 +187,13 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
     }
 
     /** The client on {@code memory}, which is closed if the client cannot be created. */
-    private static GoogleSecretManagerClient client(SecretMemory memory, Path file, Http.Target tokens,
+    private static GoogleSecretManagerClient client(SecretMemory memory,
+                                                    Function<SecretMemory, AccessTokens.Source> source,
                                                     Http.Target api, String projectId, List<String> locations,
                                                     Http.Timeouts timeouts, TlsContext tls) {
         try {
-            AccessTokens.Source source = file == null
-                    ? new AccessTokens.MetadataServer(tokens, timeouts, memory)
-                    : AccessTokens.AuthorizedUser.load(file, tokens, timeouts, memory);
             return new GoogleSecretManagerClient(api, projectId, locations, timeouts, memory,
-                    new AccessTokens(source), tls);
+                    new AccessTokens(source.apply(memory)), tls);
         } catch (RuntimeException e) {
             memory.close();
             throw e;

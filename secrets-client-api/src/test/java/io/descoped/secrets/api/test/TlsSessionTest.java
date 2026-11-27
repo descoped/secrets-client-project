@@ -267,7 +267,7 @@ class TlsSessionTest {
     }
 
     @Test
-    void anIpv6AddressIsVerifiedAsAnAddress() throws IOException {
+    void anIpv6AddressIsVerifiedAsAnAddress() {
         try (TlsContext context = TlsContext.create(trusted); TlsSession client = context.open("::1")) {
             Pair pair = new Pair(client, server);
             SSLHandshakeException e = assertThrows(SSLHandshakeException.class, pair::handshake);
@@ -290,9 +290,9 @@ class TlsSessionTest {
         try (TlsContext context = TlsContext.create(trusted); TlsSession client = context.open("127.0.0.1")) {
             Pair pair = new Pair(client, server);
             pair.handshake();
-            byte[] record = {23, 3, 3, 0, 32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+            byte[] corrupt = {23, 3, 3, 0, 32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
                     21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
-            client.feed(direct(record));
+            client.feed(direct(corrupt));
             ByteBuffer out = ByteBuffer.allocateDirect(100);
             javax.net.ssl.SSLException e = assertThrows(javax.net.ssl.SSLException.class, () -> client.read(out));
             assertTrue(e.getMessage().startsWith("TLS read failed"), e.getMessage());
