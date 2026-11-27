@@ -108,7 +108,7 @@ just coverage [module]           # JaCoCo per module in <module>/target/site/jac
 just smoke                       # JPMS smoke test: every provider on the module path and the class path; jdeps
 just linux [modules] [tests]     # the tests on Linux in Docker, where memfd_secret is in use
 just live-google                 # the Google live test (needs SECRETS_GOOGLE_TEST_PROJECT)
-just live-aws                    # the AWS live test (needs SECRETS_AWS_TEST_REGION, SECRETS_AWS_TEST_PROFILE)
+just live-aws                    # the AWS live test (SECRETS_AWS_TEST_REGION; _PROFILE, _CREDENTIALS as the test documents)
 just checks|wait|review|sonar <pr>  # a pull request's checks, waiting for them, the Claude review, SonarCloud
 just ci-log <run>                # the failing lines of a CI run
 ```

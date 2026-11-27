@@ -126,5 +126,7 @@ not hold it. It also runs the default chain in a child JVM with an environment o
 endpoint, and refusing keys and tokens in the environment.
 
 `AwsSecretsManagerLiveTest` runs against a real account when `SECRETS_AWS_TEST_REGION` is set (`just live-aws`),
-with the profile in `SECRETS_AWS_TEST_PROFILE`. It adds versions to the secrets `secrets-client-live-test` and
-`secrets-client-live-test-binary`, creating them if needed. It is not run in CI.
+with the profile in `SECRETS_AWS_TEST_PROFILE`. `SECRETS_AWS_TEST_CREDENTIALS` pins the credentials source
+(`profile`, `container`, `instance`): on ECS, `container` makes the run prove the task role. It adds versions to the
+secrets `secrets-client-live-test` and `secrets-client-live-test-binary`, creating them if needed. It is not run in
+CI.
