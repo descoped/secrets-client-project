@@ -11,10 +11,15 @@
 
     <name>Secrets Client Project</name>
     <description>A provider based API for reading and writing secrets off the Java heap, with providers for a local
-        properties file, Google Secret Manager and secrets the platform mounts as files.
+        properties file, Google Secret Manager, AWS Secrets Manager and secrets the platform mounts as files.
     </description>
     <url>https://github.com/descoped/secrets-client-project</url>
     <inceptionYear>2020</inceptionYear>
+
+    <organization>
+        <name>Descoped</name>
+        <url>https://descoped.io</url>
+    </organization>
 
     <modules>
         <module>secrets-client-bom</module>
@@ -59,6 +64,8 @@
             <name>Ove Ranheim</name>
             <email>ove.ranheim@gmail.com</email>
             <url>https://www.linkedin.com/in/overanheim/</url>
+            <organization>Descoped</organization>
+            <organizationUrl>https://descoped.io</organizationUrl>
         </developer>
     </developers>
 
@@ -66,7 +73,7 @@
     <scm child.scm.connection.inherit.append.path="false" child.scm.developerConnection.inherit.append.path="false" child.scm.url.inherit.append.path="false">
         <connection>scm:git:git://github.com/descoped/secrets-client-project.git</connection>
         <developerConnection>scm:git:git@github.com:descoped/secrets-client-project.git</developerConnection>
-        <url>https://github.com/descoped/secrets-client-project/tree/master</url>
+        <url>https://github.com/descoped/secrets-client-project</url>
         <tag>HEAD</tag>
     </scm>
 
@@ -92,7 +99,8 @@
         <!-- Releases to Maven Central through the Central Portal, by central-publishing-maven-plugin. Only releases:
              the enforcer fails a SNAPSHOT version before anything is uploaded. SNAPSHOTs go to maven.descoped.io
              only, from CI's snapshot job.
-             Release (Ove approves each one): ./mvnw release:prepare release:perform -P secrets
+             Release (Ove approves each one): ./mvnw release:prepare release:perform -P secrets, tag v<version>;
+             docs/releasing.md has the procedure.
              (`-P secrets` is no profile of this POM: ~/.mavenrc sees it and decrypts the Portal token for that run)
              Server `central` in ~/.m2/settings.xml holds the Portal user token and, for Maven 3.10, lists
              https://central.sonatype.com in repositoryOrigins. Releases are uploaded with autoPublish=false and
@@ -156,6 +164,9 @@
                             <publishingServerId>central</publishingServerId>
                             <autoPublish>false</autoPublish>
                             <waitUntil>validated</waitUntil>
+                            <!-- MD5 and SHA-1 only, the checksums Central requires: SHA-256 and SHA-512 add two files
+                                 per artifact to the namespace's monthly file count. -->
+                            <checksums>required</checksums>
                         </configuration>
                     </plugin>
                 </plugins>
@@ -330,7 +341,8 @@
                     <artifactId>maven-release-plugin</artifactId>
                     <version>3.3.1</version>
                     <configuration>
-                        <tagNameFormat>@{project.version}</tagNameFormat>
+                        <!-- v4.0.0 is the first v tag; 3.0.0 and the modules' older tags stay. -->
+                        <tagNameFormat>v@{project.version}</tagNameFormat>
                         <autoVersionSubmodules>true</autoVersionSubmodules>
                         <releaseProfiles>central,sign</releaseProfiles>
                         <goals>deploy</goals>
