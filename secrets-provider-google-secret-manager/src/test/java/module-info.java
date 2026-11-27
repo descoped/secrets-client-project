@@ -8,4 +8,6 @@ open module io.descoped.secrets.provider.google.test {
     requires io.descoped.secrets.test.support;
     requires org.junit.jupiter.api;
     requires jdk.httpserver;
+    // The live test's cleanup only.
+    requires java.net.http;
 }
