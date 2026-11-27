@@ -29,4 +29,4 @@ Anything that breaks the library's promises about secrets, for example:
 Version | Supported
 ---|---
 3.x | yes
-2.x and older | no; upgrade to 3.x ([migration guide](docs/migrating-from-2.x.md))
+2.x and older | no; upgrade to 3.x ([migration guide](docs/migrating.md#migrating-from-2x))

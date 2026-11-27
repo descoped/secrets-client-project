@@ -11,7 +11,9 @@ JVM with `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the 
 `client.readBytes(name)` | `password.withBytes(bytes -> ...)`, or `withSegment` to stay off the heap
 `client.readString(name)` | `secret.withChars(String::new)`, if a `String` is really needed
 `client.addVersion(name, chars)` (or `byte[]`, `String`) | `try (SecretMemory memory = SecretMemory.create(Map.of()); Secret value = memory.fromChars(chars)) { client.addVersion(name, value); }`; `fromChars`/`fromBytes` wipe the array
-provider `dynamic-configuration` | removed: safe-configuration for a local file, `mounted` for a directory of secret files (one file per secret)
+provider `dynamic-configuration`, a properties file | removed: safe-configuration reads a local `key=value` file
+provider `dynamic-configuration`, a directory of secret files | `mounted`, one file per secret. dynamic-configuration removed one trailing LF or CRLF; `mounted` keeps the file's bytes exactly, so write the files without a final line break (`printf '%s' "$value"`), or a password gains a `\n` and authentication fails
+provider `dynamic-configuration`, inline `secrets.values.<name>` in tests | a temporary safe-configuration file, or a `@TempDir` directory with `mounted`
 A provider implements `readBytes` and `addVersion(String, byte[])` | it implements `read(String, String)` and `addVersion(String, Secret)`; see [Writing a provider](writing-a-provider.md)
 
 ## Migrating from 2.x
