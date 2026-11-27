@@ -42,8 +42,11 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   libcrypto (the JDK's `Mac` copies its key to the heap), and TLS through OpenSSL. Reads by the current version,
   version ID or staging label; `addVersion` creates the secret if needed (`secrets.kms-key-id`,
   `secrets.replica-regions`). Credentials from the shared credentials file (`secrets.credentials-path`,
-  `secrets.aws-profile`). Proven by canary heap-dump tests over http and TLS, against a fake that checks every
-  signature.
+  `secrets.aws-profile`), the container credentials endpoint (ECS task role, EKS Pod Identity) or EC2 instance
+  metadata (IMDSv2 only), chosen by `secrets.credentials` or a default chain; tokens and keys on the way stay in
+  guarded memory. Keys in environment variables are refused unless `secrets.credentials=environment`, since the JVM
+  holds its environment on the heap. Proven by canary heap-dump tests over http and TLS, for every credential source,
+  against a fake that checks every signature.
 
 ### Changed
 

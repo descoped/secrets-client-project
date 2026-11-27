@@ -96,7 +96,7 @@ Provider | Reads | Writes | Holds values as | Use it for
 ---|---|---|---|---
 `safe-configuration` | a local `key=value` file | yes, atomically, owner-only | guarded memory | local development and tests
 `google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | guarded memory; TLS through OpenSSL 3 | production on Google Cloud
-`aws-secrets-manager` | AWS Secrets Manager | yes, creating secrets as needed | guarded memory; SigV4 and TLS through OpenSSL 3 | AWS, with keys from the shared credentials file (role credentials to come)
+`aws-secrets-manager` | AWS Secrets Manager | yes, creating secrets as needed | guarded memory; SigV4 and TLS through OpenSSL 3 | AWS: ECS, EKS, EC2, or a laptop with the shared credentials file
 `mounted` | files the platform mounts (Cloud Run, Kubernetes, Secrets Store CSI) | no | guarded memory, read on every `read` | production where the platform mounts secrets: no credential in the process
 
 Every provider follows the same contract, so switching is a configuration change; see

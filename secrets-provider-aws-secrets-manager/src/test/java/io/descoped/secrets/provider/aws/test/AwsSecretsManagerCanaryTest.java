@@ -3,6 +3,8 @@ package io.descoped.secrets.provider.aws.test;
 import io.descoped.secrets.test.support.HeapCanary;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import javax.net.ssl.SSLContext;
 import java.nio.charset.StandardCharsets;
@@ -10,10 +12,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -29,33 +34,49 @@ class AwsSecretsManagerCanaryTest {
             + "io.descoped.secrets.provider.aws.test.CanaryClient";
     private static final String PROFILE = "[default]\naws_access_key_id = " + FakeAws.ACCESS_KEY_ID + "\n";
     private static final String KNOWN_KEY = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+    /** The subject's mode for the default chain, with no source in its configuration. */
+    private static final String CHAIN = "CHAIN";
+    private static final String KNOWN_SESSION = "IQoJb3JpZ2luX2VjEJr//////////wEaCmV1LW5vcnRoLTE=";
     /** Before the canary in a binary value: not UTF-8, and Base64 {@code ////}, so that escaping applies. */
     private static final byte[] NOT_UTF8 = {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF};
 
     /** Where the canary is, and how the value is sent. */
     private enum Mode {
-        KEY, TOKEN, BINARY, ESCAPED_BINARY
+        KEY, TOKEN, BINARY, ESCAPED_BINARY,
+        /** The container endpoint: the canary is the authorization token, the secret access key and the value. */
+        CONTAINER,
+        /** IMDSv2: the canary is the IMDS session token, the session token and the value. */
+        INSTANCE
     }
 
     @TempDir
     Path dir;
     @TempDir
     Path keys;
+    /** An empty {@code HOME} for the chain, so that no {@code ~/.aws/credentials} is found. */
+    @TempDir
+    Path home;
 
     private void run(Mode mode, SSLContext tls) throws Exception {
-        boolean token = mode == Mode.TOKEN;
-        String before = PROFILE + (token
+        boolean role = mode == Mode.CONTAINER || mode == Mode.INSTANCE;
+        boolean token = mode == Mode.TOKEN || mode == Mode.INSTANCE;
+        String before = role ? "" : PROFILE + (token
                 ? "aws_secret_access_key = " + KNOWN_KEY + "\naws_session_token = "
                 : "aws_secret_access_key = ");
-        HeapCanary canary = HeapCanary.create(dir, before, "\n");
+        HeapCanary canary = HeapCanary.create(dir, before, role ? "" : "\n");
         String content = Files.readString(canary.file(), StandardCharsets.UTF_8);
         String value = content.substring(before.length(), before.length() + HeapCanary.LENGTH);
         boolean binary = mode == Mode.BINARY || mode == Mode.ESCAPED_BINARY;
         byte[] bytes = binary ? concat(NOT_UTF8, value.getBytes(StandardCharsets.US_ASCII)) : null;
         try (FakeAws aws = tls == null ? new FakeAws() : new FakeAws(tls)) {
             aws.secretAccessKey = token ? KNOWN_KEY : value;
-            aws.sessionToken = token ? value : null;
+            aws.sessionToken = token ? value : role ? KNOWN_SESSION : null;
             aws.escapeSlashes = mode == Mode.ESCAPED_BINARY;
+            if (mode == Mode.CONTAINER) {
+                aws.containerToken = value;
+            } else if (mode == Mode.INSTANCE) {
+                aws.instanceToken = value;
+            }
             aws.put("canary", "00000000-0000-0000-0000-000000000001", binary ? null : value, bytes);
             List<String> args = new ArrayList<>(List.of(mode.name(), aws.endpoint()));
             if (tls != null) {
@@ -73,6 +94,10 @@ class AwsSecretsManagerCanaryTest {
             if (token) {
                 assertTrue(aws.requests.stream().allMatch(r -> value.equals(r.headers().get("x-amz-security-token"))),
                         "the canary was the session token");
+            }
+            if (role) {
+                assertTrue(aws.credentialRequests.stream().anyMatch(r -> r.endsWith(" " + value)),
+                        "the canary was the container or IMDS token: " + aws.credentialRequests.size());
             }
         }
     }
@@ -103,6 +128,84 @@ class AwsSecretsManagerCanaryTest {
     @Test
     void anEscapedBinaryValueLeavesTheHeapClean() throws Exception {
         run(Mode.ESCAPED_BINARY, null);
+    }
+
+    /** ECS task role or EKS Pod Identity: the authorization token read from its file, and the credentials issued. */
+    @Test
+    void containerCredentialsLeaveTheHeapClean() throws Exception {
+        run(Mode.CONTAINER, null);
+    }
+
+    /** IMDSv2: the IMDS session token, and the credentials issued. */
+    @Test
+    void instanceCredentialsLeaveTheHeapClean() throws Exception {
+        run(Mode.INSTANCE, null);
+    }
+
+    /**
+     * The default chain, with an empty {@code HOME}, finds the container endpoint the platform sets in the environment
+     * (EKS Pod Identity: a full URI and a token file), and keeps everything off the heap.
+     */
+    @Test
+    void theChainFindsTheContainerEndpoint() throws Exception {
+        HeapCanary canary = HeapCanary.create(dir);
+        String value = Files.readString(canary.file(), StandardCharsets.US_ASCII);
+        try (FakeAws aws = new FakeAws()) {
+            aws.secretAccessKey = value;
+            aws.sessionToken = KNOWN_SESSION;
+            aws.containerToken = value;
+            aws.put("canary", "00000000-0000-0000-0000-000000000001", value, null);
+            // AWS_PROFILE without a credentials file does not stop the chain, as in the AWS SDKs.
+            canary.withoutEnvironment("AWS_").environment(Map.of(
+                    "HOME", home.toString(),
+                    "AWS_PROFILE", "left-over",
+                    "AWS_CONTAINER_CREDENTIALS_FULL_URI", aws.endpoint() + FakeAws.CONTAINER_PATH,
+                    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", canary.file().toString()))
+                    .run(SUBJECT, CHAIN, aws.endpoint()).assertClean();
+            assertEquals(1, aws.credentialRequests.size());
+            assertEquals(3, aws.requests.size());
+        }
+    }
+
+    /** What the chain refuses to use, before any request: each a variable that would put a credential on the heap. */
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "AWS_ACCESS_KEY_ID|AKIAIOSFODNN7EXAMPLE|AWS_ACCESS_KEY_ID is set, but keys in the environment are on the"
+                    + " Java heap",
+            "AWS_WEB_IDENTITY_TOKEN_FILE|/var/run/secrets/token|AWS_WEB_IDENTITY_TOKEN_FILE is set, but web identity",
+            "AWS_CONTAINER_AUTHORIZATION_TOKEN|Bearer x|AWS_CONTAINER_AUTHORIZATION_TOKEN is set, but a token in the"
+                    + " environment is on the Java heap"})
+    void theChainRefuses(String variable, String setting, String message) throws Exception {
+        HeapCanary canary = HeapCanary.create(dir);
+        try (FakeAws aws = new FakeAws()) {
+            Map<String, String> environment = new HashMap<>(Map.of("HOME", home.toString(), variable, setting));
+            environment.put("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", FakeAws.CONTAINER_PATH);
+            HeapCanary.Run run = canary.withoutEnvironment("AWS_").environment(environment)
+                    .run(SUBJECT, CHAIN, aws.endpoint());
+            assertNotEquals(0, run.exit());
+            assertTrue(run.output().contains(message), run.output());
+            assertTrue(aws.requests.isEmpty() && aws.credentialRequests.isEmpty(), "nothing was sent");
+        }
+    }
+
+    /**
+     * A credentials file in the configuration is used whatever the environment holds, as an explicit profile is in
+     * the AWS SDKs: keys in the environment do not stop an application that names its file.
+     */
+    @Test
+    void aConfiguredFileWinsOverKeysInTheEnvironment() throws Exception {
+        String before = PROFILE + "aws_secret_access_key = ";
+        HeapCanary canary = HeapCanary.create(dir, before, "\n");
+        String value = Files.readString(canary.file(), StandardCharsets.UTF_8)
+                .substring(before.length(), before.length() + HeapCanary.LENGTH);
+        try (FakeAws aws = new FakeAws()) {
+            aws.secretAccessKey = value;
+            aws.put("canary", "00000000-0000-0000-0000-000000000001", value, null);
+            canary.withoutEnvironment("AWS_").environment(Map.of("HOME", home.toString(),
+                            "AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE", "AWS_SECRET_ACCESS_KEY", KNOWN_KEY))
+                    .run(SUBJECT, Mode.KEY.name(), aws.endpoint()).assertClean();
+            assertEquals(3, aws.requests.size());
+        }
     }
 
     /** The same over TLS (OpenSSL). */

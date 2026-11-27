@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.CRC32C;
 
@@ -48,12 +49,17 @@ public final class HeapCanary {
     private final byte[] canary;
     private final Path file;
     private final Duration limit;
+    private final Map<String, String> environment;
+    private final List<String> cleared;
 
-    private HeapCanary(Path dir, byte[] canary, Path file, Duration limit) {
+    private HeapCanary(Path dir, byte[] canary, Path file, Duration limit, Map<String, String> environment,
+                       List<String> cleared) {
         this.dir = dir;
         this.canary = canary;
         this.file = file;
         this.limit = limit;
+        this.environment = Map.copyOf(environment);
+        this.cleared = List.copyOf(cleared);
     }
 
     /**
@@ -89,7 +95,7 @@ public final class HeapCanary {
         System.arraycopy(canary, 0, content, prefix.length, LENGTH);
         System.arraycopy(suffix, 0, content, prefix.length + LENGTH, suffix.length);
         Path file = Files.write(dir.resolve("canary.secret"), content);
-        return new HeapCanary(dir, canary, file, TIMEOUT);
+        return new HeapCanary(dir, canary, file, TIMEOUT, Map.of(), List.of());
     }
 
     /**
@@ -99,7 +105,31 @@ public final class HeapCanary {
      * @return the canary with that limit
      */
     public HeapCanary timeout(Duration limit) {
-        return new HeapCanary(dir, canary, file, limit);
+        return new HeapCanary(dir, canary, file, limit, environment, cleared);
+    }
+
+    /**
+     * The same canary, with environment variables set for the subject, on top of this JVM's own: for a subject that
+     * finds its configuration there, as a provider does on a platform.
+     *
+     * @param variables the variables
+     * @return the canary with them
+     */
+    public HeapCanary environment(Map<String, String> variables) {
+        return new HeapCanary(dir, canary, file, limit, variables, cleared);
+    }
+
+    /**
+     * The same canary, without the variables of this JVM's environment whose names start with {@code prefix}, such as
+     * {@code AWS_}: so that what the subject finds in its environment is only what {@link #environment} sets.
+     *
+     * @param prefix the prefix
+     * @return the canary without them
+     */
+    public HeapCanary withoutEnvironment(String prefix) {
+        List<String> more = new ArrayList<>(cleared);
+        more.add(prefix);
+        return new HeapCanary(dir, canary, file, limit, environment, more);
     }
 
     /**
@@ -148,7 +178,10 @@ public final class HeapCanary {
         command.addAll(Arrays.asList(args));
         // Output to a file, not a pipe: reading a pipe would block until the subject exits, and the timeout would
         // never apply.
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+        ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile());
+        builder.environment().keySet().removeIf(name -> cleared.stream().anyMatch(name::startsWith));
+        builder.environment().putAll(environment);
+        Process process = builder.start();
         if (!process.waitFor(limit.toMillis(), TimeUnit.MILLISECONDS)) {
             process.destroyForcibly().waitFor();
             throw new AssertionError("The subject did not finish within " + limit + ":\n"

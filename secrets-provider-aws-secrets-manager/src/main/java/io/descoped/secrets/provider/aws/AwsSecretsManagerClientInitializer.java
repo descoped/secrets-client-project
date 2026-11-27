@@ -7,8 +7,6 @@ import io.descoped.secrets.api.http.Http;
 import io.descoped.secrets.api.tls.TlsContext;
 import io.descoped.service.provider.api.ProviderName;
 
-import java.io.IOException;
-import java.net.InetAddress;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -18,6 +16,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 /**
@@ -34,10 +33,19 @@ import java.util.regex.Pattern;
  *     <tr><td>{@code secrets.provider}</td><td>{@code aws-secrets-manager}</td></tr>
  *     <tr><td>{@value #REGION_KEY}</td><td>the region, such as {@code eu-north-1}; else {@code AWS_REGION}, else
  *     {@code AWS_DEFAULT_REGION} (required)</td></tr>
+ *     <tr><td>{@value #CREDENTIALS_KEY}</td><td>{@code default} (the default): the chain below; {@code profile},
+ *     {@code container}, {@code instance} or {@code environment}: that source only</td></tr>
  *     <tr><td>{@value #CREDENTIALS_PATH_KEY}</td><td>the shared credentials file; else the file
  *     {@code AWS_SHARED_CREDENTIALS_FILE} names, else {@code ~/.aws/credentials}</td></tr>
  *     <tr><td>{@value #PROFILE_KEY}</td><td>the profile in that file; else {@code AWS_PROFILE}, else
  *     {@code default}</td></tr>
+ *     <tr><td>{@value #CONTAINER_URI_KEY}</td><td>the container credentials endpoint; else
+ *     {@code AWS_CONTAINER_CREDENTIALS_FULL_URI}, else {@code AWS_CONTAINER_CREDENTIALS_RELATIVE_URI} on
+ *     {@code 169.254.170.2}. http only to the ECS and EKS Pod Identity addresses or loopback, else https.</td></tr>
+ *     <tr><td>{@value #CONTAINER_TOKEN_FILE_KEY}</td><td>the file of the container endpoint's authorization token;
+ *     else {@code AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE}</td></tr>
+ *     <tr><td>{@value #INSTANCE_METADATA_KEY}</td><td>EC2 instance metadata; else
+ *     {@code AWS_EC2_METADATA_SERVICE_ENDPOINT}, else {@code http://169.254.169.254}</td></tr>
  *     <tr><td>{@value #ENDPOINT_KEY}</td><td>the API endpoint, default
  *     {@code https://secretsmanager.<region>.amazonaws.com} ({@code amazonaws.com.cn} in the China regions); another
  *     host serving the same API, such as a VPC or FIPS endpoint or a test server. It must use https; plain http only
@@ -55,9 +63,22 @@ import java.util.regex.Pattern;
  *     {@link SecretMemory}</td></tr>
  * </table>
  *
- * <p>Credentials come from the shared credentials file: static keys, or temporary ones with a session token, which
- * are read from the file again every minute, so that a tool that renews them there is followed. Other sources (the
- * ECS container endpoint, EC2 instance metadata, web identity) are not supported yet.
+ * <p>Credentials, each kept in guarded memory and fetched again five minutes before temporary ones expire, come from
+ * the source {@value #CREDENTIALS_KEY} names, or the first of this chain that applies:
+ *
+ * <ol>
+ *     <li>{@code profile}, when the configuration names a file or a profile, whatever the environment holds;</li>
+ *     <li>{@code AWS_ACCESS_KEY_ID} set: the client refuses to start, since keys in the environment are on the Java
+ *     heap; {@code environment} uses them anyway, outside the guarantee (for AWS Lambda);</li>
+ *     <li>{@code AWS_WEB_IDENTITY_TOKEN_FILE} set: refused, web identity (EKS IRSA) is not supported yet;</li>
+ *     <li>{@code profile}: the shared credentials file, when it exists ({@code AWS_SHARED_CREDENTIALS_FILE}, else
+ *     {@code ~/.aws/credentials}). Static keys, or temporary ones, which are read from the file again every
+ *     minute;</li>
+ *     <li>{@code container}: the container credentials endpoint (ECS task role, EKS Pod Identity), when it is
+ *     configured or the platform sets its variables;</li>
+ *     <li>{@code instance}: EC2 instance metadata, IMDSv2 only, unless {@code AWS_EC2_METADATA_DISABLED} is
+ *     {@code true}.</li>
+ * </ol>
  *
  * <p>Versions: {@code latest} (or {@code null}) is the current version ({@code AWSCURRENT}); a version ID selects
  * that version, and any other string is a staging label, such as {@code AWSPREVIOUS}. {@code addVersion} returns the
@@ -70,8 +91,23 @@ public final class AwsSecretsManagerClientInitializer implements SecretManagerCl
     /** The configuration key for the region. */
     public static final String REGION_KEY = "secrets.region";
 
+    /**
+     * The configuration key for the credentials source: {@code default} (the chain), {@code profile},
+     * {@code container}, {@code instance} or {@code environment}.
+     */
+    public static final String CREDENTIALS_KEY = "secrets.credentials";
+
     /** The configuration key for the shared credentials file. */
     public static final String CREDENTIALS_PATH_KEY = "secrets.credentials-path";
+
+    /** The configuration key for the container credentials endpoint, instead of the platform's variables. */
+    public static final String CONTAINER_URI_KEY = "secrets.container-credentials-uri";
+
+    /** The configuration key for the container authorization token's file. */
+    public static final String CONTAINER_TOKEN_FILE_KEY = "secrets.container-authorization-token-file";
+
+    /** The configuration key for the EC2 instance metadata endpoint. */
+    public static final String INSTANCE_METADATA_KEY = "secrets.instance-metadata-endpoint";
 
     /** The configuration key for the profile in the shared credentials file. */
     public static final String PROFILE_KEY = "secrets.aws-profile";
@@ -126,14 +162,15 @@ public final class AwsSecretsManagerClientInitializer implements SecretManagerCl
         Http.Timeouts timeouts = new Http.Timeouts(
                 duration(configuration, CONNECT_TIMEOUT_KEY, Duration.ofSeconds(10)),
                 duration(configuration, REQUEST_TIMEOUT_KEY, Duration.ofSeconds(30)));
-        Path file = credentialsFile(configuration);
-        String profile = firstOf(configuration.get(PROFILE_KEY), System.getenv("AWS_PROFILE"), "default");
-        TlsContext tls = "https".equalsIgnoreCase(endpoint.getScheme()) ? tlsContext(configuration) : null;
+        UnaryOperator<String> environment = System::getenv;
+        CredentialSources.Choice choice = CredentialSources.choose(configuration, environment);
+        boolean secure = "https".equalsIgnoreCase(endpoint.getScheme()) || choice.needsTls();
+        TlsContext tls = secure ? tlsContext(configuration) : null;
         try {
             SecretMemory memory = SecretMemory.create(configuration);
             Clock clock = Clock.systemUTC();
             CredentialsProvider credentials = new CredentialsProvider(
-                    new SharedCredentialsFile(memory, file, profile, clock), clock);
+                    choice.source(memory, tls, timeouts, clock, environment), clock);
             AwsSecretsManagerClient.Settings settings = new AwsSecretsManagerClient.Settings(
                     Http.Target.of(endpoint, tls), timeouts, kmsKeyId, replicas);
             return new AwsSecretsManagerClient(settings, new SigV4(memory, region, "secretsmanager"), memory,
@@ -153,7 +190,7 @@ public final class AwsSecretsManagerClientInitializer implements SecretManagerCl
     }
 
     private static String region(Map<String, String> configuration) {
-        String region = firstOf(configuration.get(REGION_KEY), System.getenv("AWS_REGION"),
+        String region = CredentialSources.firstOf(configuration.get(REGION_KEY), System.getenv("AWS_REGION"),
                 System.getenv("AWS_DEFAULT_REGION"));
         if (region == null) {
             throw new IllegalArgumentException("No AWS region: set '" + REGION_KEY + "' or AWS_REGION");
@@ -177,22 +214,6 @@ public final class AwsSecretsManagerClientInitializer implements SecretManagerCl
         return regions;
     }
 
-    private static Path credentialsFile(Map<String, String> configuration) {
-        String configured = firstOf(configuration.get(CREDENTIALS_PATH_KEY),
-                System.getenv("AWS_SHARED_CREDENTIALS_FILE"));
-        return configured != null ? Path.of(configured)
-                : Path.of(System.getProperty("user.home"), ".aws", "credentials");
-    }
-
-    private static String firstOf(String... values) {
-        for (String value : values) {
-            if (value != null && !value.isBlank()) {
-                return value;
-            }
-        }
-        return null;
-    }
-
     private static URI httpsOrLoopback(String key, String value) {
         URI uri;
         try {
@@ -204,27 +225,11 @@ public final class AwsSecretsManagerClientInitializer implements SecretManagerCl
             throw new IllegalArgumentException("'" + key + "' has no host: " + value);
         }
         if ("https".equalsIgnoreCase(uri.getScheme())
-                || "http".equalsIgnoreCase(uri.getScheme()) && isLoopback(uri.getHost())) {
+                || "http".equalsIgnoreCase(uri.getScheme()) && CredentialSources.isLoopback(uri.getHost())) {
             return uri;
         }
         throw new IllegalArgumentException("'" + key + "' must use https (http only for a loopback address): "
                 + value);
-    }
-
-    private static boolean isLoopback(String host) {
-        if ("localhost".equalsIgnoreCase(host)) {
-            return true;
-        }
-        String literal = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
-        // Only IP literals: a name is never looked up here.
-        if (!literal.matches("[0-9.]+|[0-9a-fA-F:]+")) {
-            return false;
-        }
-        try {
-            return InetAddress.getByName(literal).isLoopbackAddress();
-        } catch (IOException _) {
-            return false;
-        }
     }
 
     private static Duration duration(Map<String, String> configuration, String key, Duration defaultValue) {
