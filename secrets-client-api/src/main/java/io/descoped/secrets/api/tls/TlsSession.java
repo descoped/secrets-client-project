@@ -1,6 +1,7 @@
 package io.descoped.secrets.api.tls;
 
 import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.internal.OpenSsl;
 
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
@@ -8,7 +9,7 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 
-import static io.descoped.secrets.api.tls.OpenSsl.call;
+import static io.descoped.secrets.api.internal.OpenSsl.call;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**

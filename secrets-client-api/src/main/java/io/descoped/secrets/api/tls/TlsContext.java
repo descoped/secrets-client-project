@@ -1,6 +1,7 @@
 package io.descoped.secrets.api.tls;
 
 import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.internal.OpenSsl;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -9,7 +10,7 @@ import java.util.Objects;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import static io.descoped.secrets.api.tls.OpenSsl.call;
+import static io.descoped.secrets.api.internal.OpenSsl.call;
 
 /**
  * The TLS settings of one client, for {@link TlsSession}s through the system's OpenSSL 3, so that what is sent and
