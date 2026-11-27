@@ -44,14 +44,19 @@ src/it/consumer/                           JPMS smoke test: an application using
 docs/                                      user documentation
 ```
 
-Requires JDK 25 or later; the Maven Wrapper brings Maven.
+Requires JDK 25 or later; the Maven Wrapper brings Maven. The [`justfile`](justfile) holds the regular tasks
+([just](https://just.systems)); `just` lists them:
 
 ```sh
-./mvnw verify                    # compile with -Xlint:all -Werror, run the tests (JUnit 6)
-./mvnw verify javadoc:javadoc    # plus Javadoc with doclint; warnings fail the build
-src/it/consumer/run.sh           # JPMS smoke test on the module path and the class path
-./mvnw verify -P coverage        # JaCoCo report per module in <module>/target/site/jacoco
+just build                       # compile with -Xlint:all -Werror, run the tests (JUnit 6)
+just check                       # what CI checks: build, Javadoc with doclint, the JPMS smoke test
+just test <module> [pattern]     # one module, optionally some tests
+just coverage [module]           # JaCoCo report per module in <module>/target/site/jacoco
+just linux                       # the tests on Linux in Docker, where memfd_secret is in use
 ```
+
+Without just, the same with Maven: `./mvnw verify`, `./mvnw verify javadoc:javadoc`, `src/it/consumer/run.sh`,
+`./mvnw verify -P coverage`.
 
 - Each module's tests are a separate named module (`src/test/java/module-info.java`) and reach the providers only
   through `SecretManagerClient.create`, as an application does.
