@@ -160,8 +160,10 @@ class GoogleSecretManagerLiveTest {
             }
         }
         String config = System.getenv("CLOUDSDK_CONFIG");
-        Path file = (config != null && !config.isEmpty() ? Path.of(config) : Path.of(System.getProperty("user.home"), ".config", "gcloud"))
-                .resolve("application_default_credentials.json");
+        Path directory = config != null && !config.isEmpty()
+                ? Path.of(config)
+                : Path.of(System.getProperty("user.home"), ".config", "gcloud");
+        Path file = directory.resolve("application_default_credentials.json");
         return Files.isRegularFile(file) ? file : null;
     }
 
