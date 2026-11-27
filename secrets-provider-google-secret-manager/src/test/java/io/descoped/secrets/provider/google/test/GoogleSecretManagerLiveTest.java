@@ -34,9 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * Against the real Google Secret Manager, only when {@code SECRETS_GOOGLE_TEST_PROJECT} names a project; not run in CI.
  * Credentials are the authorized_user file in {@code SECRETS_GOOGLE_TEST_CREDENTIALS_PATH}, or else Application
  * Default Credentials as the provider finds them; {@code SECRETS_GOOGLE_TEST_CREDENTIALS=metadata} uses only the
- * metadata server (on Google Cloud, such as a Cloud Run job). It adds versions to the secret {@code secrets-client-live-test},
- * creating it with automatic replication if needed, and afterwards destroys all enabled versions but the newest
- * {@value #KEEP} (active versions are billed).
+ * metadata server (on Google Cloud, such as a Cloud Run job). It adds versions to the secret
+ * {@code secrets-client-live-test}, creating it with automatic replication if needed, and afterwards destroys all
+ * enabled versions but the newest {@value #KEEP} (active versions are billed).
  */
 @EnabledIfEnvironmentVariable(named = "SECRETS_GOOGLE_TEST_PROJECT", matches = ".+")
 class GoogleSecretManagerLiveTest {
