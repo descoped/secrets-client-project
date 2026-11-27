@@ -116,9 +116,11 @@ A `null` name or value | `NullPointerException`
 A Java `String` is immutable: it stays in the heap until the garbage collector reclaims it, and it cannot be wiped. So:
 
 - For passwords and keys, use `read`: the value stays in guarded memory (see below) until it is handed over with
-  `withSegment`, or with `withBytes`/`withChars`, whose heap copy is wiped when the callback returns. A provider built
-  on guarded memory (safe-configuration, Google Secret Manager) never puts the value on the Java heap on the way, and
-  neither does its `addVersion(String, Secret)`; dynamic-configuration holds its values as strings anyway.
+  `withSegment`, or with `withBytes`/`withChars`, whose heap copy is wiped when the callback returns. A provider that
+  reads files (safe-configuration, mounted) never puts the value on the Java heap on the way, and neither does
+  safe-configuration's `addVersion(String, Secret)`. Google Secret Manager's own code keeps it off the heap too, but
+  the JDK's TLS makes short-lived heap copies while it decrypts and encrypts ([details](providers/google-secret-manager.md#memory-and-tls)).
+  dynamic-configuration holds its values as strings anyway.
 - Otherwise use `readChars` or `readBytes`, and wipe the array in a `finally` block as soon as it has been used.
 - `readChars` decodes UTF-8 into a fresh array; the intermediate bytes and buffers are wiped on every path, including
   errors. Invalid UTF-8 is an error, never replaced with `?`.

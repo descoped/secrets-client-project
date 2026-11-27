@@ -45,8 +45,9 @@ change to the API or to a provider's documented behaviour needs a new major vers
   returns. No runtime dependency that holds them on the heap. A canary heap-dump test proves each read and write path.
   Code from 3.x does not meet this yet; new code must. Accepted interim exceptions, until the plan removes them:
   `read` in dynamic-configuration (removed in phase 6) copies `readBytes` into guarded memory, the default
-  `addVersion(String, Secret)` hands a wiped heap copy to `addVersion(String, byte[])`, and the JDK's TLS
-  (`SSLEngine`) is unproven until phase 5's canary test through TLS.
+  `addVersion(String, Secret)` hands a wiped heap copy to `addVersion(String, byte[])`. The JDK's TLS
+  (`SSLEngine`) is the documented boundary: it copies plaintext through heap arrays (phase 5's canary test asserts
+  the leak), and native TLS is deferred by the owner's decision (dossier, `future-work.md`).
 - **One contract for every provider.** A missing secret, a closed client and a write the provider cannot do are
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and
