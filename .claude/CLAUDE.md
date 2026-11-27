@@ -13,7 +13,7 @@ true when behaviour changes.
 |---|---|---|
 | `secrets-client-project` (root) | n/a | parent and aggregator |
 | `secrets-client-bom` | n/a | BOM of the modules below |
-| `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`), guarded memory, and for the network providers TLS through OpenSSL (`io.descoped.secrets.api.tls`) and HTTP/1.1, JSON and Base64 on guarded memory (`io.descoped.secrets.api.http`), both qualified exports |
+| `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`), guarded memory, and for the network providers TLS through OpenSSL (`io.descoped.secrets.api.tls`) HTTP/1.1, JSON and Base64 on guarded memory (`io.descoped.secrets.api.http`) and SHA-256/HMAC-SHA256 through libcrypto for request signing (`io.descoped.secrets.api.crypto`), all qualified exports; the OpenSSL binding itself is in the unexported `internal` package |
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory, through the API module's HTTP and TLS; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
 | `secrets-provider-mounted` | `io.descoped.secrets.provider.mounted` | read-only: secrets the platform mounts as files (Cloud Run, Kubernetes, Secrets Store CSI), read into guarded memory on every read; no network, no credential |

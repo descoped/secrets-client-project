@@ -34,6 +34,13 @@ class CanaryHarnessTest {
         HeapCanary.create(dir).run(SUBJECT, "guarded").assertClean();
     }
 
+    /** SHA-256 and HMAC-SHA256 through OpenSSL, with the canary as the key and as the message. */
+    @Test
+    void sha256AndHmacLeaveTheHeapClean() throws Exception {
+        HeapCanary.Run run = HeapCanary.create(dir).run(SUBJECT, "sha256").assertClean();
+        assertTrue(run.output().contains("SIGNED 64"), run.output());
+    }
+
     @Test
     void anOpenSecretIsNotOnTheHeapEither() throws Exception {
         HeapCanary.create(dir).run(SUBJECT, "guarded-open").assertClean();

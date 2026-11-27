@@ -2,6 +2,7 @@ package io.descoped.secrets.test.support.test;
 
 import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretMemory;
+import io.descoped.secrets.api.crypto.Sha256;
 import io.descoped.secrets.test.support.HeapDump;
 
 import java.io.IOException;
@@ -51,6 +52,18 @@ public final class CanarySubject {
             });
             switch (mode) {
                 case "guarded" -> secret.close();
+                case "sha256" -> {
+                    // The canary as an HMAC key and as a message to hash, as request signing uses its keys.
+                    try (Secret out = memory.allocate(2L * Sha256.LENGTH, o -> secret.withSegment(segment -> {
+                        Sha256.hmac(segment, MemorySegment.ofArray(new byte[]{'d', 'a', 't', 'e'}),
+                                o.asSlice(0, Sha256.LENGTH));
+                        Sha256.digest(segment, o.asSlice(Sha256.LENGTH, Sha256.LENGTH));
+                        return null;
+                    }))) {
+                        System.out.println("SIGNED " + out.withSegment(MemorySegment::byteSize));
+                    }
+                    secret.close();
+                }
                 case "guarded-open" -> HeapDump.dump(dump);
                 case "hand-over" -> {
                     int bytes = secret.withBytes(b -> b.length);
