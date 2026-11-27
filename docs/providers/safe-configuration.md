@@ -75,7 +75,9 @@ the same time can lose one of the updates. Use one writer per file.
 
 ## Memory
 
-The file is read with a `FileChannel` straight into guarded memory and parsed there; each value is copied into a
+The file is read with a `FileChannel` into guarded memory (through
+[`SecretMemory.read`](../api.md#guarded-memory-secretmemory-and-secret), which handles `memfd_secret` memory) and
+parsed there; each value is copied into a
 `Secret` of its own, and the file's content is wiped. `addVersion` reads the file again into guarded memory, builds
 the new content there and writes it from there. Only the keys, which are not secret, are ever on the Java heap.
 

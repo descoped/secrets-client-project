@@ -25,6 +25,10 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   for the metadata server only. New keys `secrets.credentials`, `secrets.credentials-path`, `secrets.token-endpoint`,
   `secrets.metadata-endpoint`. Verified against real Google Cloud: with `authorized_user` credentials, and on Cloud
   Run (second-generation) with the metadata server and locked guarded memory.
+- `SecretMemory.read(channel, maxLength)`: reads a channel to its end into guarded memory. On `memfd_secret` memory
+  it goes through a small guarded buffer of ordinary pages. The kernel cannot pin `memfd_secret` pages, so a read from
+  a FUSE or virtiofs file, such as Cloud Run's secret volumes, or with direct I/O failed with `EFAULT`. Every
+  provider reads its files this way.
 - Provider `mounted` (`secrets-provider-mounted`): read-only, for secrets the platform mounts as files (Cloud Run
   secret volumes, Kubernetes secret volumes, the Secrets Store CSI driver on GKE and EKS). Each `read` reads the file
   into guarded memory with a `FileChannel`, never cached, so rotated values are seen; no network code and no

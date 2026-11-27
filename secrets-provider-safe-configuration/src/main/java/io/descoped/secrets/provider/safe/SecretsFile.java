@@ -31,6 +31,8 @@ final class SecretsFile {
     private static final byte[] UTF8_BOM = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
     private static final byte[] LF = {'\n'};
     private static final byte[] CRLF = {'\r', '\n'};
+    /** The largest secrets file read. */
+    static final long MAX_SIZE = Integer.MAX_VALUE - 1L;
 
     private SecretsFile() {
     }
@@ -48,42 +50,21 @@ final class SecretsFile {
     }
 
     /**
-     * Reads the whole of {@code file} into a new secret.
+     * Reads the whole of {@code file} into a new secret, through {@link SecretMemory#read}.
      *
-     * @throws SecretManagerException if the file cannot be read, or changes while it is read
+     * @throws SecretManagerException if the file cannot be read or is too large
      */
     static Secret read(Path file, SecretMemory memory) {
         try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
-            long size = channel.size();
-            if (size > Integer.MAX_VALUE) {
-                throw new SecretManagerException("The secrets file " + file + " is too large");
-            }
-            Secret content = memory.allocate(size, segment -> fill(channel, segment, file));
-            if (channel.size() != size) {
+            Secret content = memory.read(channel, MAX_SIZE + 1);
+            if (content.length() > MAX_SIZE) {
                 content.close();
-                throw changed(file);
+                throw new SecretManagerException("The secrets file " + file + " is too large");
             }
             return content;
         } catch (IOException e) {
             throw new SecretManagerException("Cannot read the secrets file " + file, e);
         }
-    }
-
-    private static void fill(FileChannel channel, MemorySegment segment, Path file) {
-        ByteBuffer buffer = segment.asByteBuffer();
-        try {
-            while (buffer.hasRemaining()) {
-                if (channel.read(buffer) < 0) {
-                    throw changed(file);
-                }
-            }
-        } catch (IOException e) {
-            throw new SecretManagerException("Cannot read the secrets file " + file, e);
-        }
-    }
-
-    private static SecretManagerException changed(Path file) {
-        return new SecretManagerException("The secrets file " + file + " changed while it was read");
     }
 
     /**

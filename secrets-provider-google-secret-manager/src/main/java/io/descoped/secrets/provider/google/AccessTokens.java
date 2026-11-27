@@ -6,7 +6,6 @@ import io.descoped.secrets.api.SecretMemory;
 
 import java.io.IOException;
 import java.lang.foreign.MemorySegment;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -292,25 +291,17 @@ final class AccessTokens implements AutoCloseable {
             return value;
         }
 
+        /** The largest credentials file read. */
+        private static final long MAX_FILE = 1024L * 1024;
+
         private static Secret read(Path file, SecretMemory memory) {
             try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
-                long size = channel.size();
-                if (size > 1024 * 1024) {
+                Secret content = memory.read(channel, MAX_FILE + 1);
+                if (content.length() > MAX_FILE) {
+                    content.close();
                     throw new SecretManagerException("The Google credentials file " + file + " is too large");
                 }
-                return memory.allocate(size, segment -> {
-                    ByteBuffer buffer = segment.asByteBuffer();
-                    try {
-                        while (buffer.hasRemaining()) {
-                            if (channel.read(buffer) < 0) {
-                                throw new SecretManagerException("The Google credentials file " + file
-                                        + " changed while it was read");
-                            }
-                        }
-                    } catch (IOException e) {
-                        throw new SecretManagerException("Cannot read the Google credentials file " + file, e);
-                    }
-                });
+                return content;
             } catch (IOException e) {
                 throw new SecretManagerException("Cannot read the Google credentials file " + file, e);
             }

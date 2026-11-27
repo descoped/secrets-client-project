@@ -7,9 +7,7 @@ import io.descoped.secrets.api.SecretMemory;
 import io.descoped.secrets.api.SecretNotFoundException;
 
 import java.io.IOException;
-import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -38,7 +36,6 @@ final class MountedClient implements SecretManagerClient {
     private static final Pattern SEGMENT = Pattern.compile("\\w[\\w.-]*");
     private static final String SECRET_NAME = "secretName";
     private static final String SECRET_VALUE = "secretValue";
-    private static final long INITIAL = 4096;
     /** How many times a name is resolved and opened before a file that vanishes in between is reported missing. */
     private static final int ATTEMPTS = 3;
 
@@ -174,59 +171,25 @@ final class MountedClient implements SecretManagerClient {
     }
 
     /**
-     * Reads the file into guarded memory until its end, not trusting its reported size (some mounts report none), and
-     * returns it as a secret of its exact size. {@code file} is a real path: it is opened without following a link,
-     * so the file opened is the one that was checked to be inside the directory.
+     * Reads the file into guarded memory to its end, not trusting its reported size (some mounts report none), through
+     * {@link SecretMemory#read}, which also handles mounts the kernel serves by pinning the buffer (Cloud Run's FUSE
+     * secret volumes). {@code file} is a real path: it is opened without following a link, so the file opened is the
+     * one that was checked to be inside the directory.
      *
      * @throws NoSuchFileException if the file is gone
      */
     private Secret readFile(String secretName, Path file) throws NoSuchFileException {
         try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
-            long capacity = Math.clamp(channel.size() + 1, INITIAL, MAX_SIZE + 1);
-            long[] length = {0};
-            Secret buffer = memory.allocate(capacity, segment -> length[0] = fill(channel, segment, 0, secretName));
-            try {
-                while (length[0] == buffer.length()) {
-                    if (buffer.length() > MAX_SIZE) {
-                        throw new SecretManagerException("Secret '" + secretName + "' is larger than "
-                                + MAX_SIZE + " bytes");
-                    }
-                    Secret old = buffer;
-                    long filled = length[0];
-                    buffer = memory.allocate(Math.min(old.length() * 2, MAX_SIZE + 1), segment -> old.withSegment(
-                            from -> {
-                                MemorySegment.copy(from, 0, segment, 0, filled);
-                                length[0] = fill(channel, segment, filled, secretName);
-                                return null;
-                            }));
-                    old.close();
-                }
-                Secret current = buffer;
-                long size = length[0];
-                return memory.allocate(size, out -> current.withSegment(from -> {
-                    MemorySegment.copy(from, 0, out, 0, size);
-                    return null;
-                }));
-            } finally {
-                buffer.close();
+            Secret value = memory.read(channel, MAX_SIZE + 1);
+            if (value.length() > MAX_SIZE) {
+                value.close();
+                throw new SecretManagerException("Secret '" + secretName + "' is larger than " + MAX_SIZE + " bytes");
             }
+            return value;
         } catch (NoSuchFileException e) {
             throw e;
         } catch (IOException e) {
             throw new SecretManagerException("Cannot read secret '" + secretName + "'", e);
         }
-    }
-
-    /** Reads into {@code segment} from {@code from} until it is full or the file ends; returns the length filled. */
-    private static long fill(FileChannel channel, MemorySegment segment, long from, String secretName) {
-        ByteBuffer target = segment.asByteBuffer().position(Math.toIntExact(from));
-        try {
-            while (target.hasRemaining() && channel.read(target) >= 0) {
-                // Read on until full or at the end.
-            }
-        } catch (IOException e) {
-            throw new SecretManagerException("Cannot read secret '" + secretName + "'", e);
-        }
-        return target.position();
     }
 }
