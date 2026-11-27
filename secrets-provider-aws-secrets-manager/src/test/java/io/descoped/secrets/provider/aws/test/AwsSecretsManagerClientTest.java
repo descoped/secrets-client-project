@@ -132,8 +132,9 @@ class AwsSecretsManagerClientTest {
     /** Names are at most 512 characters; only ARNs are longer. */
     @Test
     void aNameLongerThan512IsNotFoundWithoutARequest() throws IOException {
+        String name = "n".repeat(513);
         try (SecretManagerClient client = open()) {
-            assertThrows(SecretNotFoundException.class, () -> client.read("n".repeat(513)));
+            assertThrows(SecretNotFoundException.class, () -> client.read(name));
         }
         assertTrue(aws.requests.isEmpty());
     }
