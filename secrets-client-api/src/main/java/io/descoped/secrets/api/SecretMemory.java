@@ -13,7 +13,6 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.lang.ref.Cleaner;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SelectableChannel;
@@ -225,13 +224,13 @@ public final class SecretMemory implements AutoCloseable {
             bouncePool = new Pool(pool.os, pool.lockRequired, false);
             bounceBlock = bouncePool.take(Math.min(Reader.BOUNCE, maxLength));
         }
-        Throwable failure = null;
+        Exception failure = null;
         try {
             return new Reader(this, bounceBlock, channel, maxLength).read();
         } catch (UncheckedIOException e) {
             failure = e.getCause();
             throw e.getCause();
-        } catch (RuntimeException | Error e) {
+        } catch (RuntimeException e) {
             failure = e;
             throw e;
         } finally {
@@ -240,7 +239,7 @@ public final class SecretMemory implements AutoCloseable {
     }
 
     /** Wipes and unmaps the bounce memory; a failure to do so is added to {@code failure}, or thrown if none. */
-    private static void closeBounce(Pool bouncePool, Block bounceBlock, Throwable failure) {
+    private static void closeBounce(Pool bouncePool, Block bounceBlock, Exception failure) {
         if (bouncePool == null) {
             return;
         }
