@@ -4,15 +4,14 @@ import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerClientInitializer;
 import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.api.SecretMemory;
+import io.descoped.secrets.api.tls.TlsContext;
 import io.descoped.service.provider.api.ProviderName;
 
-import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.GeneralSecurityException;
 import java.time.Duration;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
@@ -53,14 +52,18 @@ import java.util.regex.Pattern;
  *     address</td></tr>
  *     <tr><td>{@value #CONNECT_TIMEOUT_KEY}</td><td>ISO-8601 duration, default {@code PT10S}</td></tr>
  *     <tr><td>{@value #REQUEST_TIMEOUT_KEY}</td><td>ISO-8601 duration, default {@code PT30S}</td></tr>
+ *     <tr><td>{@value #CA_FILE_KEY}</td><td>a PEM file of the only certificates to trust, such as a private CA;
+ *     the system's trusted certificates (OpenSSL's default locations) when absent</td></tr>
  *     <tr><td>{@value io.descoped.secrets.api.SecretMemory#GUARD_KEY},
  *     {@value io.descoped.secrets.api.SecretMemory#LOCK_KEY}</td><td>the guarded memory, see
  *     {@link io.descoped.secrets.api.SecretMemory}</td></tr>
  * </table>
  *
- * <p>The access token is fetched on first use and replaced when it has less than three minutes left. TLS is the
- * JDK's ({@code SSLEngine}, TLS 1.3 or 1.2, the default trust store as configured when the client is created, host
- * name verification). The timeouts include looking the host name up; they are at most one hour.
+ * <p>The access token is fetched on first use and replaced when it has less than three minutes left. TLS goes
+ * through the system's OpenSSL 3 ({@code libssl}; Homebrew's {@code openssl@3} on macOS), not the JDK, so that
+ * nothing sent or received is on the Java heap: TLS 1.3 or 1.2 with AES-GCM or ChaCha20-Poly1305, the certificate
+ * verified against the trusted roots and the host, SNI. Without OpenSSL 3 the client cannot be created. The timeouts
+ * include looking the host name up; they are at most one hour.
  *
  * <p>Versions are Secret Manager's: {@code latest} or a version number; {@code addVersion} returns the new number.
  * Secret names follow Secret Manager's rule: 1 to 255 letters, digits, {@code -} and {@code _}. Reading a name or
@@ -97,6 +100,9 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
 
     /** The configuration key for the request timeout. */
     public static final String REQUEST_TIMEOUT_KEY = "secrets.request-timeout";
+
+    /** The configuration key for a PEM file of the only certificates to trust, instead of the system's. */
+    public static final String CA_FILE_KEY = "secrets.tls.ca-file";
 
     /** The default API endpoint. */
     public static final String DEFAULT_ENDPOINT = "https://secretmanager.googleapis.com";
@@ -169,32 +175,26 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         Http.Timeouts timeouts = new Http.Timeouts(
                 duration(configuration, CONNECT_TIMEOUT_KEY, Duration.ofSeconds(10)),
                 duration(configuration, REQUEST_TIMEOUT_KEY, Duration.ofSeconds(30)));
-        SSLContext tls = tls();
-        SecretMemory memory = SecretMemory.create(configuration);
+        String caFile = configuration.get(CA_FILE_KEY);
+        TlsContext tls = TlsContext.create(caFile == null ? null : Path.of(caFile));
+        SecretMemory memory;
+        try {
+            memory = SecretMemory.create(configuration);
+        } catch (RuntimeException e) {
+            tls.close();
+            throw e;
+        }
         try {
             Path file = mode.equals(METADATA) ? null : credentialsFile(credentialsPath);
             AccessTokens.Source source = file == null
                     ? new AccessTokens.MetadataServer(Http.Target.of(metadataEndpoint, tls), timeouts, memory)
                     : AccessTokens.AuthorizedUser.load(file, Http.Target.of(tokenEndpoint, tls), timeouts, memory);
             return new GoogleSecretManagerClient(Http.Target.of(endpoint, tls), projectId, locations, timeouts,
-                    memory, new AccessTokens(source));
+                    memory, new AccessTokens(source), tls);
         } catch (RuntimeException e) {
             memory.close();
+            tls.close();
             throw e;
-        }
-    }
-
-    /**
-     * A TLS context of the client's own, with the JDK's default trust store as it is configured now
-     * ({@code javax.net.ssl.trustStore} and the like are read here, not once per JVM).
-     */
-    private static SSLContext tls() {
-        try {
-            SSLContext context = SSLContext.getInstance("TLS");
-            context.init(null, null, null);
-            return context;
-        } catch (GeneralSecurityException e) {
-            throw new SecretManagerException("TLS is not available", e);
         }
     }
 

@@ -17,11 +17,12 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   one. Closing the client closes the secrets it returned.
 - safe-configuration reads, parses, holds and writes in guarded memory: no value is on the Java heap unless the caller
   makes a heap copy, proven by a canary heap-dump test.
-- Google Secret Manager on guarded memory, with its own HTTP/1.1 client (`SocketChannel`, `SSLEngine`), JSON reader
-  and Base64: the provider's own code keeps values, the access token and the refresh token off the Java heap (proven
-  over plain HTTP by a canary test). Over TLS the JDK's `SSLEngine` makes heap copies while it encrypts and
-  decrypts, which the garbage collector reclaims but does not wipe; a canary test records that boundary, and the `mounted` provider is the path with no network code.
-  Credentials: an `authorized_user` file (`gcloud auth application-default
+- Google Secret Manager on guarded memory, with its own HTTP/1.1 client, JSON reader and Base64, and TLS through the
+  system's OpenSSL 3 (FFM) instead of the JDK's `SSLEngine`, which copies plaintext through heap arrays: values, the
+  access token and the refresh token are never on the Java heap, over TLS too (proven by canary tests over HTTP and
+  TLS). TLS 1.3 or 1.2, AES-GCM or ChaCha20-Poly1305 with ECDHE, the certificate verified against the system's roots
+  or `secrets.tls.ca-file`, and the host name or IP address. Needs OpenSSL 3 (`libssl.so.3`; `brew install
+  openssl@3` on macOS); `javax.net.ssl.trustStore` does not apply. Credentials: an `authorized_user` file (`gcloud auth application-default
   login`), `GOOGLE_APPLICATION_CREDENTIALS`, gcloud's file, or the metadata server; `secrets.credentials=metadata`
   for the metadata server only. New keys `secrets.credentials`, `secrets.credentials-path`, `secrets.token-endpoint`,
   `secrets.metadata-endpoint`. Verified against real Google Cloud: with `authorized_user` credentials, and on Cloud

@@ -13,9 +13,9 @@ true when behaviour changes.
 |---|---|---|
 | `secrets-client-project` (root) | n/a | parent and aggregator |
 | `secrets-client-bom` | n/a | BOM of the modules below |
-| `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
+| `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`), guarded memory, and TLS through OpenSSL for the providers (`io.descoped.secrets.api.tls`, a qualified export) |
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
-| `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory: its own HTTP/1.1 client (`SSLEngine`), JSON reader and Base64; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
+| `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory: its own HTTP/1.1 client, TLS through OpenSSL 3 (`io.descoped.secrets.api.tls`), JSON reader and Base64; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
 | `secrets-provider-mounted` | `io.descoped.secrets.provider.mounted` | read-only: secrets the platform mounts as files (Cloud Run, Kubernetes, Secrets Store CSI), read into guarded memory on every read; no network, no credential |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
@@ -42,9 +42,9 @@ change to the API or to a provider's documented behaviour needs a new major vers
   access to secrets (access and refresh tokens), only in guarded native memory (FFM, `java.lang.foreign`): never in a
   heap array, a `String` or a heap `ByteBuffer`, except the hand-over copy a caller asks for, wiped when its callback
   returns. No runtime dependency that holds them on the heap. A canary heap-dump test proves each read and write path.
-  The one accepted exception is the JDK's TLS (`SSLEngine`), the documented boundary: it copies plaintext through
-  heap arrays (phase 5's canary test asserts the leak), and native TLS (OpenSSL through FFM) is deferred by the
-  owner's decision; its plan is in the owner's private notes, not in this repository.
+  Network providers do TLS through the system's OpenSSL 3 (`io.descoped.secrets.api.tls`, FFM, exported only to the
+  provider modules), never the JDK's `SSLEngine`, which copies plaintext through heap arrays; the TLS canary test
+  proves it.
 - **One contract for every provider.** A missing secret, a closed client and a write the provider cannot do are
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and

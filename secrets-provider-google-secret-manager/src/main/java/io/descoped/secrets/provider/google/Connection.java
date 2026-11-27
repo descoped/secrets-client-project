@@ -1,11 +1,9 @@
 package io.descoped.secrets.provider.google;
 
-import javax.net.ssl.SNIHostName;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLEngineResult;
+import io.descoped.secrets.api.tls.TlsContext;
+import io.descoped.secrets.api.tls.TlsSession;
+
 import javax.net.ssl.SSLException;
-import javax.net.ssl.SSLParameters;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.InetAddress;
@@ -16,7 +14,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -52,11 +49,11 @@ abstract sealed class Connection implements AutoCloseable {
      * Connects to {@code host:port} (the name looked up, and the connection made, within {@code connectTimeout} and
      * before {@code deadline}, both {@link System#nanoTime()}), and for TLS completes the handshake.
      */
-    static Connection open(String host, int port, SSLContext tls, long connectTimeoutNanos, long deadline)
+    static Connection open(String host, int port, TlsContext tls, long connectTimeoutNanos, long deadline)
             throws IOException {
         long connectDeadline = Math.min(deadline, System.nanoTime() + connectTimeoutNanos);
         InetSocketAddress address = new InetSocketAddress(resolve(host, connectDeadline), port);
-        Connection connection = tls == null ? new Plain() : new Tls(tls, host, port);
+        Connection connection = tls == null ? new Plain() : new Tls(tls, host);
         try {
             connection.connect(address, connectDeadline);
             connection.start(deadline);
@@ -223,83 +220,54 @@ abstract sealed class Connection implements AutoCloseable {
     }
 
     /**
-     * TLS 1.3 or 1.2 through {@link SSLEngine}, with the context's trust store, host name verification and SNI.
-     * {@link #awaitData} buffers whole records (ciphertext); {@link #readAvailable} decrypts the buffered ones.
+     * TLS through OpenSSL ({@link TlsSession}), with the context's trust, host name verification and SNI.
+     * {@link #awaitData} buffers whole records (ciphertext); {@link #readAvailable} hands them to OpenSSL and decrypts
+     * them straight into the caller's buffer, so plaintext is never on the Java heap.
      */
     static final class Tls extends Connection {
 
-        private static final ByteBuffer EMPTY = ByteBuffer.allocateDirect(0);
         private static final int HEADER = 5;
+        /** The largest TLS record with its header, and room to spare. */
+        private static final int RECORD = 18 * 1024;
 
-        private final SSLEngine engine;
-        /** Records received and not yet unwrapped; kept in write mode (position is the end of the data). */
-        private ByteBuffer netIn;
-        private final ByteBuffer netOut;
+        private final TlsSession session;
+        /** Records received and not yet given to OpenSSL; kept in write mode (position is the end of the data). */
+        private ByteBuffer netIn = ByteBuffer.allocateDirect(RECORD);
+        private final ByteBuffer netOut = ByteBuffer.allocateDirect(RECORD);
         private boolean closed;
 
-        private Tls(SSLContext context, String host, int port) throws IOException {
+        private Tls(TlsContext context, String host) throws IOException {
             super();
-            engine = context.createSSLEngine(host, port);
-            engine.setUseClientMode(true);
-            SSLParameters parameters = engine.getSSLParameters();
-            parameters.setProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
-            parameters.setEndpointIdentificationAlgorithm("HTTPS");
-            // SNI carries host names only, never an IP address.
-            if (!isIpLiteral(host)) {
-                parameters.setServerNames(List.of(new SNIHostName(host)));
+            try {
+                session = context.open(host);
+            } catch (RuntimeException e) {
+                super.close();
+                throw e;
             }
-            engine.setSSLParameters(parameters);
-            int packet = engine.getSession().getPacketBufferSize();
-            netIn = ByteBuffer.allocateDirect(packet);
-            netOut = ByteBuffer.allocateDirect(packet);
         }
 
         @Override
         void start(long deadline) throws IOException {
-            engine.beginHandshake();
-            // No application data is expected before the request is sent; this buffer only receives handshake output.
-            ByteBuffer scratch = ByteBuffer.allocateDirect(engine.getSession().getApplicationBufferSize());
-            while (true) {
-                SSLEngineResult.HandshakeStatus status = engine.getHandshakeStatus();
-                switch (status) {
-                    case NEED_WRAP -> wrap(EMPTY, deadline);
-                    case NEED_TASK -> runTasks();
-                    case NEED_UNWRAP, NEED_UNWRAP_AGAIN -> {
-                        awaitData(deadline);
-                        if (!hasRecord() || unwrap(scratch) < 0) {
-                            throw new SSLException("The server closed the connection during the handshake");
-                        }
-                    }
-                    default -> {
-                        if (scratch.position() > 0) {
-                            throw new SSLException("The server sent data before the request");
-                        }
-                        return;
-                    }
+            while (session.handshake() == TlsSession.Handshake.WANT_READ) {
+                flush(deadline);
+                awaitData(deadline);
+                if (!hasRecord()) {
+                    throw new SSLException("The server closed the connection during the handshake");
                 }
+                feedRecords();
             }
+            // The last flight (Finished) is sent with the request.
+            flush(deadline);
         }
 
-        private static boolean isIpLiteral(String host) {
-            return host.indexOf(':') >= 0 || host.chars().allMatch(c -> c == '.' || c >= '0' && c <= '9');
-        }
-
-        private void runTasks() {
-            Runnable task;
-            while ((task = engine.getDelegatedTask()) != null) {
-                task.run();
+        /** Sends what OpenSSL has to send. */
+        private void flush(long deadline) throws IOException {
+            while (session.hasOutput()) {
+                netOut.clear();
+                session.drain(netOut);
+                netOut.flip();
+                writeFully(netOut, deadline);
             }
-        }
-
-        private void wrap(ByteBuffer src, long deadline) throws IOException {
-            netOut.clear();
-            SSLEngineResult result = engine.wrap(src, netOut);
-            if (result.getStatus() != SSLEngineResult.Status.OK
-                    && result.getStatus() != SSLEngineResult.Status.CLOSED) {
-                throw new SSLException("Cannot wrap: " + result.getStatus());
-            }
-            netOut.flip();
-            writeFully(netOut, deadline);
         }
 
         /** Whether {@link #netIn} holds a whole record. */
@@ -311,8 +279,35 @@ abstract sealed class Connection implements AutoCloseable {
             return netIn.position() >= HEADER + length;
         }
 
+        /** Gives OpenSSL every whole record in {@link #netIn}. */
+        private void feedRecords() throws SSLException {
+            netIn.flip();
+            int end = 0;
+            while (netIn.remaining() - end >= HEADER) {
+                int at = netIn.position() + end;
+                int length = (netIn.get(at + 3) & 0xFF) << 8 | netIn.get(at + 4) & 0xFF;
+                if (netIn.remaining() - end < HEADER + length) {
+                    break;
+                }
+                end += HEADER + length;
+            }
+            ByteBuffer records = netIn.slice(netIn.position(), end);
+            session.feed(records);
+            netIn.position(netIn.position() + end);
+            netIn.compact();
+        }
+
+        @Override
+        void write(ByteBuffer src, long deadline) throws IOException {
+            session.write(src);
+            flush(deadline);
+        }
+
         @Override
         void awaitData(long deadline) throws IOException {
+            if (session.pending() > 0) {
+                return;
+            }
             while (!hasRecord() && !ended()) {
                 if (!netIn.hasRemaining()) {
                     ByteBuffer larger = ByteBuffer.allocateDirect(netIn.capacity() * 2);
@@ -326,46 +321,27 @@ abstract sealed class Connection implements AutoCloseable {
             }
         }
 
-        /** Unwraps one buffered record into {@code dst}: the bytes produced, or -1 once the peer closed TLS. */
-        private int unwrap(ByteBuffer dst) throws IOException {
-            netIn.flip();
-            SSLEngineResult result;
-            try {
-                result = engine.unwrap(netIn, dst);
-            } finally {
-                netIn.compact();
-            }
-            return switch (result.getStatus()) {
-                case OK -> result.bytesProduced();
-                case CLOSED -> {
-                    closed = true;
-                    yield -1;
-                }
-                default -> throw new SSLException("Cannot unwrap: " + result.getStatus());
-            };
-        }
-
-        @Override
-        void write(ByteBuffer src, long deadline) throws IOException {
-            while (src.hasRemaining()) {
-                wrap(src, deadline);
-            }
-        }
-
         @Override
         int readAvailable(ByteBuffer dst) throws IOException {
-            int total = 0;
-            while (!closed && hasRecord() && dst.remaining() >= minReadSpace()) {
-                int n = unwrap(dst);
-                if (n > 0) {
-                    total += n;
-                }
-                // A record without data (a session ticket, a key update) may ask for a task or a reply.
-                if (engine.getHandshakeStatus() == SSLEngineResult.HandshakeStatus.NEED_TASK) {
-                    runTasks();
-                }
+            if (closed) {
+                return -1;
             }
-            if (total == 0 && (closed || ended() && !hasRecord())) {
+            if (hasRecord()) {
+                feedRecords();
+            }
+            int total = 0;
+            while (dst.hasRemaining()) {
+                int n = session.read(dst);
+                if (n < 0) {
+                    closed = true;
+                    break;
+                }
+                if (n == 0) {
+                    break;
+                }
+                total += n;
+            }
+            if (total == 0 && (closed || ended() && !hasRecord() && session.pending() == 0)) {
                 return -1;
             }
             return total;
@@ -373,13 +349,13 @@ abstract sealed class Connection implements AutoCloseable {
 
         @Override
         int minReadSpace() {
-            return engine.getSession().getApplicationBufferSize();
+            return 1;
         }
 
         @Override
         public void close() {
             try {
-                engine.closeOutbound();
+                session.close();
             } finally {
                 super.close();
             }

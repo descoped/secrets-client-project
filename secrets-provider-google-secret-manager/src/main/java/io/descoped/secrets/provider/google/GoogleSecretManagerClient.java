@@ -5,6 +5,7 @@ import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
 import io.descoped.secrets.api.SecretMemory;
 import io.descoped.secrets.api.SecretNotFoundException;
+import io.descoped.secrets.api.tls.TlsContext;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -42,16 +43,18 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
     private final Http.Timeouts timeouts;
     private final SecretMemory memory;
     private final AccessTokens tokens;
+    private final TlsContext tls;
     private volatile boolean closed;
 
     GoogleSecretManagerClient(Http.Target api, String projectId, List<String> replicationLocations,
-                              Http.Timeouts timeouts, SecretMemory memory, AccessTokens tokens) {
+                              Http.Timeouts timeouts, SecretMemory memory, AccessTokens tokens, TlsContext tls) {
         this.api = api;
         this.project = "/v1/projects/" + projectId;
         this.replicationLocations = List.copyOf(replicationLocations);
         this.timeouts = timeouts;
         this.memory = memory;
         this.tokens = tokens;
+        this.tls = tls;
     }
 
     @Override
@@ -130,7 +133,11 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
     public void close() {
         closed = true;
         tokens.close();
-        memory.close();
+        try {
+            memory.close();
+        } finally {
+            tls.close();
+        }
     }
 
     private void checkOpen() {

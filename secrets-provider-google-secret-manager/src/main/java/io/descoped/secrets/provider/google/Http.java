@@ -2,8 +2,8 @@ package io.descoped.secrets.provider.google;
 
 import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretMemory;
+import io.descoped.secrets.api.tls.TlsContext;
 
-import javax.net.ssl.SSLContext;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -50,10 +50,10 @@ final class Http {
      * @param port the port
      * @param path the base path, without a trailing {@code /}
      */
-    record Target(SSLContext tls, String host, int port, String path) {
+    record Target(TlsContext tls, String host, int port, String path) {
 
         /** The target of an http or https URI; {@code tls} is used for https. */
-        static Target of(URI uri, SSLContext tls) {
+        static Target of(URI uri, TlsContext tls) {
             boolean secure = "https".equalsIgnoreCase(uri.getScheme());
             String host = uri.getHost();
             if (host.startsWith("[") && host.endsWith("]")) {
