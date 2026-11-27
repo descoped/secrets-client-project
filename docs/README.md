@@ -8,7 +8,8 @@ order: 1
 
 The secrets client reads and writes secrets through one API, `SecretManagerClient`, from Google Secret Manager, AWS
 Secrets Manager, files the platform mounts or a local file. Every value, and every token and key that grants access
-to one, is kept in guarded native memory, never on the Java heap, and a heap-dump test proves it for every path.
+to one, is kept in guarded native memory, never on the Java heap, and a heap-dump test proves it for every path. It
+brings no third-party library: the network stack is its own, on the JDK and the system's OpenSSL 3.
 
 Start here:
 

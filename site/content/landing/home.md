@@ -3,7 +3,7 @@ title: "Secrets Client"
 description: >-
   A Java library that reads and writes secrets from Google Secret Manager, AWS Secrets Manager, mounted files or a
   local file through one API, and keeps every value and every credential off the Java heap, proven by heap dumps.
-eyebrow: "Secrets for Java 25, off the heap, with no dependencies"
+eyebrow: "Secrets for Java 25, off the heap, with no third-party dependencies"
 headline: "Your secrets never touch the Java heap"
 subline: >-
   Read a password from Google Secret Manager, AWS Secrets Manager or a file the platform mounts, through one small
@@ -124,7 +124,7 @@ and readable only by you. [The provider](/docs/providers/safe-configuration/)
 The secrets client depends on no third-party library. No AWS SDK, no Google Cloud client, no gRPC, no Netty, no
 Jackson, no Bouncy Castle. TLS, HTTP/1.1, JSON, Base64, SigV4 and the OAuth and metadata calls are the library's own
 code, on the JDK and the system's OpenSSL 3. Your application gets the API, the provider it uses, and Descoped's
-9 KB service-provider API: nothing to patch when a transitive dependency has a CVE, and nothing that keeps a secret
+9 KB [service-provider-api](https://github.com/descoped/service-provider-api): nothing to patch when a transitive dependency has a CVE, and nothing that keeps a secret
 on the heap behind your back. [Architecture](/docs/architecture/)
 
 <!-- label: mvn dependency:tree, the AWS provider at runtime -->
