@@ -176,32 +176,37 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         Http.Timeouts timeouts = new Http.Timeouts(
                 duration(configuration, CONNECT_TIMEOUT_KEY, Duration.ofSeconds(10)),
                 duration(configuration, REQUEST_TIMEOUT_KEY, Duration.ofSeconds(30)));
+        Path file = mode.equals(METADATA) ? null : credentialsFile(credentialsPath);
         // OpenSSL only when something is reached over https: the metadata server and test servers are plain http.
-        boolean secure = isHttps(endpoint) || !mode.equals(METADATA) && isHttps(tokenEndpoint);
-        String caFile = configuration.get(CA_FILE_KEY);
-        TlsContext tls = secure ? TlsContext.create(caFile == null ? null : Path.of(caFile)) : null;
-        SecretMemory memory;
+        boolean secure = isHttps(endpoint) || file != null && isHttps(tokenEndpoint);
+        TlsContext tls = secure ? tlsContext(configuration.get(CA_FILE_KEY)) : null;
         try {
-            memory = SecretMemory.create(configuration);
-        } catch (RuntimeException e) {
-            if (tls != null) {
-                tls.close();
+            SecretMemory memory = SecretMemory.create(configuration);
+            try {
+                AccessTokens.Source source = file == null
+                        ? new AccessTokens.MetadataServer(Http.Target.of(metadataEndpoint, tls), timeouts, memory)
+                        : AccessTokens.AuthorizedUser.load(file, Http.Target.of(tokenEndpoint, tls), timeouts,
+                        memory);
+                return new GoogleSecretManagerClient(Http.Target.of(endpoint, tls), projectId, locations, timeouts,
+                        memory, new AccessTokens(source), tls);
+            } catch (RuntimeException e) {
+                memory.close();
+                throw e;
             }
+        } catch (RuntimeException e) {
+            closeQuietly(tls);
             throw e;
         }
-        try {
-            Path file = mode.equals(METADATA) ? null : credentialsFile(credentialsPath);
-            AccessTokens.Source source = file == null
-                    ? new AccessTokens.MetadataServer(Http.Target.of(metadataEndpoint, tls), timeouts, memory)
-                    : AccessTokens.AuthorizedUser.load(file, Http.Target.of(tokenEndpoint, tls), timeouts, memory);
-            return new GoogleSecretManagerClient(Http.Target.of(endpoint, tls), projectId, locations, timeouts,
-                    memory, new AccessTokens(source), tls);
-        } catch (RuntimeException e) {
-            memory.close();
-            if (tls != null) {
-                tls.close();
-            }
-            throw e;
+    }
+
+    private static TlsContext tlsContext(String caFile) {
+        Path path = caFile == null ? null : Path.of(caFile);
+        return TlsContext.create(path);
+    }
+
+    private static void closeQuietly(TlsContext tls) {
+        if (tls != null) {
+            tls.close();
         }
     }
 

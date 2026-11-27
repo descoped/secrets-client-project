@@ -27,6 +27,7 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -187,9 +188,9 @@ class TlsSessionTest {
     }
 
     @Test
-    void aHostNameIsVerified() throws IOException {
+    void aHostNameIsVerified() {
         try (TlsContext context = TlsContext.create(trusted); TlsSession client = context.open("localhost")) {
-            new Pair(client, server).handshake();
+            assertDoesNotThrow(new Pair(client, server)::handshake);
         }
     }
 
@@ -235,21 +236,21 @@ class TlsSessionTest {
     }
 
     @Test
-    void anotherNameIsRefused() throws IOException {
+    void anotherNameIsRefused() {
         refused("elsewhere.example", server, "hostname mismatch");
     }
 
     @Test
-    void anotherIpAddressIsRefused() throws IOException {
+    void anotherIpAddressIsRefused() {
         refused("127.0.0.2", server, "ip address mismatch");
     }
 
     @Test
-    void anUntrustedCertificateIsRefused() throws IOException {
+    void anUntrustedCertificateIsRefused() {
         refused("127.0.0.1", untrusted, "self");
     }
 
-    private static void refused(String host, SSLContext serverContext, String reason) throws IOException {
+    private static void refused(String host, SSLContext serverContext, String reason) {
         try (TlsContext context = TlsContext.create(trusted); TlsSession client = context.open(host)) {
             Pair pair = new Pair(client, serverContext);
             SSLHandshakeException e = assertThrows(SSLHandshakeException.class, pair::handshake);
@@ -266,8 +267,8 @@ class TlsSessionTest {
 
     @Test
     void misuseIsReported() {
-        SecretManagerException missing = assertThrows(SecretManagerException.class,
-                () -> TlsContext.create(keys.resolve("missing.pem")));
+        Path absent = keys.resolve("missing.pem");
+        SecretManagerException missing = assertThrows(SecretManagerException.class, () -> TlsContext.create(absent));
         assertTrue(missing.getMessage().contains("missing.pem"), missing.getMessage());
 
         TlsContext context = TlsContext.create(trusted);
