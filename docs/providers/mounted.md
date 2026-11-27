@@ -52,16 +52,22 @@ try (Secret password = client.read("db-password")) {
 - The only version is `latest` (or `null`): the platform chooses the version when it mounts the volume. Another
   version, a missing file and a directory are `SecretNotFoundException`.
 - Files are read on every `read`, never cached. A value the platform rotates in place, as Kubernetes does, is seen at
-  the next read.
+  the next read. A read that races a rotation, and finds the file it resolved already removed, resolves the name once
+  more before it reports the secret as missing.
+- The file is opened without following a link, after its real path was checked to be inside the directory.
+- A file that does not end (a FIFO without a writer, a mount that hangs) blocks the read, and `close()` waits for
+  reads in progress.
 - `addVersion` throws `UnsupportedOperationException`: the platform owns the files.
 - Closing the client closes every `Secret` it returned. The client holds no value between reads.
 - Error messages name the secret, never its value.
 
 ## Platforms
 
-**Cloud Run.** Mount each secret under the directory, e.g. `--set-secrets=/secrets/db-password=db-password:latest`.
-Cloud Run mounts at most one secret per directory, so another secret goes in a directory of its own:
-`/secrets/api/key=api-key:latest` is read as `api/key`, with `secrets.mounted.directory=/secrets`.
+**Cloud Run.** Cloud Run mounts each secret volume at a directory of its own, so give each secret its own
+directory under one parent and point `secrets.mounted.directory` at the parent: with
+`--set-secrets=/secrets/db/password=db-password:latest,/secrets/api/key=api-key:latest`, the secrets are read as
+`db/password` and `api/key` with `secrets.mounted.directory=/secrets`. Do not also mount a secret at the parent
+directory itself.
 
 **Kubernetes and the Secrets Store CSI driver.** Point `secrets.mounted.directory` at the volume's `mountPath`; each
 key or object alias is a file there.
@@ -69,10 +75,10 @@ key or object alias is a file there.
 ## Testing
 
 `MountedClientTest` covers:
-- reads, rotation, binary values, values of 3 MiB and the 4 MiB limit;
+- reads, rotation, reads racing Kubernetes-style rotations, binary values, values of 3 MiB and the 4 MiB limit;
 - a file of unknown size (a FIFO);
 - nested names and Kubernetes-style links, and a link out of the directory;
 - invalid names, versions, writes, closing and configuration.
 
-`MountedCanaryTest` runs the canary gate: a child JVM reads the canary through the provider, and its heap dump must
-not hold it.
+`MountedCanaryTest` runs the canary gate: a child JVM reads the canary through the provider, also from a FIFO
+through the buffer that grows, and its heap dump must not hold it.

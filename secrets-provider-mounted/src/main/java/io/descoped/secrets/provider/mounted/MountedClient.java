@@ -12,6 +12,7 @@ import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.NotDirectoryException;
 import java.nio.file.Path;
@@ -34,7 +35,9 @@ final class MountedClient implements SecretManagerClient {
     /** The largest file read. */
     static final long MAX_SIZE = 4L * 1024 * 1024;
 
-    private static final Pattern SEGMENT = Pattern.compile("[A-Za-z0-9_][A-Za-z0-9_.-]*");
+    private static final Pattern SEGMENT = Pattern.compile("\\w[\\w.-]*");
+    private static final String SECRET_NAME = "secretName";
+    private static final String SECRET_VALUE = "secretValue";
     private static final long INITIAL = 4096;
 
     private final Path directory;
@@ -56,14 +59,24 @@ final class MountedClient implements SecretManagerClient {
 
     @Override
     public Secret read(String secretName, String secretVersion) {
-        Objects.requireNonNull(secretName, "secretName");
+        Objects.requireNonNull(secretName, SECRET_NAME);
         lock.readLock().lock();
         try {
             checkOpen();
             if (!(secretVersion == null || LATEST.equals(secretVersion)) || !isValidName(secretName)) {
                 throw new SecretNotFoundException(secretName, secretVersion);
             }
-            return readFile(secretName, secretVersion, file(secretName, secretVersion));
+            try {
+                return readFile(secretName, file(secretName, secretVersion));
+            } catch (NoSuchFileException _) {
+                // Kubernetes swaps its ..data link and then removes the old files: a file resolved during the swap,
+                // or just before it, is gone when it is resolved or opened. Resolving again finds the new one.
+                try {
+                    return readFile(secretName, file(secretName, secretVersion));
+                } catch (NoSuchFileException _) {
+                    throw new SecretNotFoundException(secretName, secretVersion);
+                }
+            }
         } finally {
             lock.readLock().unlock();
         }
@@ -78,23 +91,24 @@ final class MountedClient implements SecretManagerClient {
 
     @Override
     public String addVersion(String secretName, byte[] secretValue) {
-        Objects.requireNonNull(secretName, "secretName");
-        Objects.requireNonNull(secretValue, "secretValue");
+        Objects.requireNonNull(secretName, SECRET_NAME);
+        Objects.requireNonNull(secretValue, SECRET_VALUE);
         checkOpen();
         throw readOnly();
     }
 
     @Override
     public String addVersion(String secretName, Secret secretValue) {
-        Objects.requireNonNull(secretName, "secretName");
-        Objects.requireNonNull(secretValue, "secretValue");
+        Objects.requireNonNull(secretName, SECRET_NAME);
+        Objects.requireNonNull(secretValue, SECRET_VALUE);
         checkOpen();
         throw readOnly();
     }
 
     /**
      * Closes the client and every secret {@link #read(String, String)} returned, and wipes and unmaps their memory,
-     * after the callbacks running on those secrets in other threads. Idempotent. As safe-configuration does, the
+     * after the callbacks running on those secrets in other threads. Idempotent. It waits for reads in progress, so a
+     * read that blocks (a FIFO without a writer, a mount that hangs) holds it up. As safe-configuration does, the
      * memory is closed outside the client's lock, and inside a callback of one of the secrets this throws
      * {@link IllegalStateException} with the client closed; a later {@code close()} wipes the memory.
      */
@@ -132,12 +146,18 @@ final class MountedClient implements SecretManagerClient {
         return true;
     }
 
-    /** The real file of a secret: inside the directory, after following symbolic links. */
-    private Path file(String secretName, String secretVersion) {
+    /**
+     * The real file of a secret: inside the directory, after following symbolic links.
+     *
+     * @throws NoSuchFileException if there is no such file (now)
+     */
+    private Path file(String secretName, String secretVersion) throws NoSuchFileException {
         Path real;
         try {
             real = directory.resolve(secretName).toRealPath();
-        } catch (NoSuchFileException | NotDirectoryException _) {
+        } catch (NoSuchFileException e) {
+            throw e;
+        } catch (NotDirectoryException _) {
             throw new SecretNotFoundException(secretName, secretVersion);
         } catch (IOException e) {
             throw new SecretManagerException("Cannot read secret '" + secretName + "'", e);
@@ -153,10 +173,13 @@ final class MountedClient implements SecretManagerClient {
 
     /**
      * Reads the file into guarded memory until its end, not trusting its reported size (some mounts report none), and
-     * returns it as a secret of its exact size.
+     * returns it as a secret of its exact size. {@code file} is a real path: it is opened without following a link,
+     * so the file opened is the one that was checked to be inside the directory.
+     *
+     * @throws NoSuchFileException if the file is gone
      */
-    private Secret readFile(String secretName, String secretVersion, Path file) {
-        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
+    private Secret readFile(String secretName, Path file) throws NoSuchFileException {
+        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
             long capacity = Math.clamp(channel.size() + 1, INITIAL, MAX_SIZE + 1);
             long[] length = {0};
             Secret buffer = memory.allocate(capacity, segment -> length[0] = fill(channel, segment, 0, secretName));
@@ -185,9 +208,8 @@ final class MountedClient implements SecretManagerClient {
             } finally {
                 buffer.close();
             }
-        } catch (NoSuchFileException _) {
-            // Removed between the lookup and the open.
-            throw new SecretNotFoundException(secretName, secretVersion);
+        } catch (NoSuchFileException e) {
+            throw e;
         } catch (IOException e) {
             throw new SecretManagerException("Cannot read secret '" + secretName + "'", e);
         }

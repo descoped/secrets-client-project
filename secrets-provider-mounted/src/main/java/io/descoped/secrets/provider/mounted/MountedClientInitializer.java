@@ -44,7 +44,8 @@ import java.util.Set;
  * <p>The only version is {@code latest} (or {@code null}): which version a file holds is the platform's choice,
  * made when the volume is mounted. A missing file, a directory and another version are
  * {@link io.descoped.secrets.api.SecretNotFoundException}. A file larger than 4 MiB is an error. {@code addVersion}
- * throws {@link UnsupportedOperationException}: the platform owns the files.
+ * throws {@link UnsupportedOperationException}: the platform owns the files. A file that does not end (a FIFO without
+ * a writer, a mount that hangs) blocks the read, and {@code close()} waits for reads in progress.
  */
 @ProviderName("mounted")
 public final class MountedClientInitializer implements SecretManagerClientInitializer {

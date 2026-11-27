@@ -14,13 +14,17 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.LockSupport;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -116,6 +120,48 @@ class MountedClientTest {
         }
     }
 
+    /**
+     * Reads racing Kubernetes-style rotations: a file resolved through {@code ..data} can be gone when it is opened.
+     * A stress test, not a deterministic one: without the provider's second resolve it fails in most runs (4 of 6
+     * measured), with it in none.
+     */
+    @Test
+    void aRotationDuringAReadIsNotReportedAsMissing() throws Exception {
+        try (SecretManagerClient client = open()) {
+            Path first = Files.createDirectories(secrets.resolve("..first"));
+            Files.writeString(first.resolve("token"), "one");
+            Files.createSymbolicLink(secrets.resolve("..data"), first.getFileName());
+            Files.createSymbolicLink(secrets.resolve("token"), Path.of("..data", "token"));
+            AtomicBoolean stop = new AtomicBoolean();
+            CompletableFuture<Void> rotator = CompletableFuture.runAsync(() -> {
+                int n = 0;
+                try {
+                    while (!stop.get()) {
+                        Path next = Files.createDirectories(secrets.resolve("..v" + ++n));
+                        Files.writeString(next.resolve("token"), "v" + n);
+                        Path link = Files.createSymbolicLink(secrets.resolve("..data_tmp"), next.getFileName());
+                        Files.move(link, secrets.resolve("..data"), StandardCopyOption.ATOMIC_MOVE);
+                        Path old = secrets.resolve(n == 1 ? "..first" : "..v" + (n - 1));
+                        Files.delete(old.resolve("token"));
+                        Files.delete(old);
+                        // Kubernetes rotates rarely; a pause keeps two swaps from landing within one read.
+                        LockSupport.parkNanos(TimeUnit.MICROSECONDS.toNanos(100));
+                    }
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            try {
+                for (int i = 0; i < 60000; i++) {
+                    assertFalse(client.readString("token").isEmpty());
+                }
+            } finally {
+                stop.set(true);
+                rotator.get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     @Test
     void aLinkOutOfTheDirectoryIsRefused() throws IOException {
         try (SecretManagerClient client = open()) {
@@ -123,7 +169,7 @@ class MountedClientTest {
             Files.createSymbolicLink(secrets.resolve("escape"), outside);
             SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readBytes("escape"));
             assertTrue(e.getMessage().contains("outside"), e.getMessage());
-            assertTrue(!e.getMessage().contains("not yours"), e.getMessage());
+            assertFalse(e.getMessage().contains("not yours"), e.getMessage());
         }
     }
 
@@ -181,10 +227,9 @@ class MountedClientTest {
     @Test
     void secretsAreNotInMessages() throws IOException {
         try (SecretManagerClient client = open()) {
-            Files.writeString(secrets.resolve("a"), "hunter2".repeat(1000));
             Files.write(secrets.resolve("big"), "hunter2".repeat(700_000).getBytes(StandardCharsets.UTF_8));
             SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readBytes("big"));
-            assertTrue(!e.getMessage().contains("hunter2"), e.getMessage());
+            assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
         }
     }
 }

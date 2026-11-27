@@ -28,6 +28,13 @@ class MountedCanaryTest {
         HeapCanary.create(dir).run(SUBJECT, "read-open").assertClean();
     }
 
+    /** A file of unknown size, padded so that the read grows its buffer, through a FIFO. */
+    @Test
+    void aStreamReadThroughAGrowingBufferLeavesTheHeapClean() throws Exception {
+        String padding = "-".repeat(CanaryReader.PADDING);
+        HeapCanary.create(dir, padding, padding).run(SUBJECT, "read-stream").assertClean();
+    }
+
     @Test
     void theCopyReadBytesReturnsIsFound() throws Exception {
         HeapCanary.create(dir).run(SUBJECT, "read-bytes").assertLeaked("ascii");
