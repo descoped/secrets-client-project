@@ -33,7 +33,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   secret volumes, Kubernetes secret volumes, the Secrets Store CSI driver on GKE and EKS). Each `read` reads the file
   into guarded memory with a `FileChannel`, never cached, so rotated values are seen; no network code and no
   credential in the process. Names are paths under `secrets.mounted.directory`; links may not lead outside it.
-  Proven by a canary heap-dump test.
+  Proven by a canary heap-dump test, and verified on Cloud Run with a Secret Manager secret volume.
 
 ### Changed
 
