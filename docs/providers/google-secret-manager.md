@@ -115,6 +115,6 @@ at once, read and written back, and the child JVM's heap dump must not hold it.
 `SECRETS_GOOGLE_TEST_CREDENTIALS=metadata` for the metadata server only, on Google Cloud. It writes a text value and a
 60 KiB binary value to the secret `secrets-client-live-test`, reads them back by version and as `Secret`, reads a
 missing secret, and afterwards destroys all enabled versions but the newest two (active versions are billed). It is
-not run in CI. It passes against Google with `authorized_user` credentials, and on Cloud Run (second-generation execution
-environment) with the metadata server, guarded memory locked as by default
+not run in CI. It passes against Google with `authorized_user` credentials, and on Cloud Run (second-generation
+execution environment) with the metadata server, guarded memory locked as by default
 ([issue #15](https://github.com/descoped/secrets-client-project/issues/15)).

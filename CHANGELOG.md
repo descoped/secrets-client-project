@@ -23,7 +23,8 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   canary test; TLS is verified next). Credentials: an `authorized_user` file (`gcloud auth application-default
   login`), `GOOGLE_APPLICATION_CREDENTIALS`, gcloud's file, or the metadata server; `secrets.credentials=metadata`
   for the metadata server only. New keys `secrets.credentials`, `secrets.credentials-path`, `secrets.token-endpoint`,
-  `secrets.metadata-endpoint`.
+  `secrets.metadata-endpoint`. Verified against real Google Cloud: with `authorized_user` credentials, and on Cloud
+  Run (second-generation) with the metadata server and locked guarded memory.
 
 ### Changed
 
