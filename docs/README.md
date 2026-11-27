@@ -39,4 +39,3 @@ More:
 - [Writing a provider](writing-a-provider.md): adding a backend of your own
 - [Migrating](migrating.md): from 3.x to 4.0, from 2.x, and from the 0.x versions
 - [Roadmap](roadmap.md): what is planned but not done
-- [Releasing](releasing.md): how a version is released, for maintainers

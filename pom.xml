@@ -100,7 +100,7 @@
              the enforcer fails a SNAPSHOT version before anything is uploaded. SNAPSHOTs go to maven.descoped.io
              only, from CI's snapshot job.
              Release (Ove approves each one): ./mvnw release:prepare release:perform -P secrets, tag v<version>;
-             docs/releasing.md has the procedure.
+             RELEASING.md has the procedure.
              (`-P secrets` is no profile of this POM: ~/.mavenrc sees it and decrypts the Portal token for that run)
              Server `central` in ~/.m2/settings.xml holds the Portal user token and, for Maven 3.10, lists
              https://central.sonatype.com in repositoryOrigins. Releases are uploaded with autoPublish=false and

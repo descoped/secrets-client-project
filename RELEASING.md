@@ -1,9 +1,3 @@
----
-title: Releasing
-description: How a version of the secrets client is released to Maven Central, for maintainers.
-order: 13
----
-
 # Releasing
 
 Releases are made **only by the owner, or on his explicit word**, and go only to Maven Central. A SNAPSHOT never goes
@@ -85,7 +79,7 @@ gh release create v4.0.0 --verify-tag --title 4.0.0 --notes-file <the CHANGELOG 
 
 The links in the notes must be absolute (`https://github.com/descoped/secrets-client-project/blob/v4.0.0/docs/...`),
 since relative links do not resolve on the release page. Then, in a pull request, set the version in
-[getting started](getting-started.md) to the new release.
+[getting started](docs/getting-started.md) to the new release.
 
 ## If something goes wrong
 

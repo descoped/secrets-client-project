@@ -6,7 +6,9 @@ Guidance for Claude Code in this repository.
 
 The Descoped secrets client: `SecretManagerClient`, a provider based API for reading and writing secrets, and its
 providers. One Maven reactor, group `io.descoped.secrets`, owned by Descoped. `README.md` is the short
-introduction (what it is, how it works, working with the code); `docs/` is the user documentation. Both must stay
+introduction (what it is, how it works, working with the code); `docs/` is the user documentation, which the site at
+https://ssc.descoped.io publishes (`site/`); maintainer documents (`RELEASING.md`, `SECURITY.md`) stay at the root,
+out of the site. Both must stay
 true when behaviour changes.
 
 | Module | JPMS module | Role |
@@ -53,7 +55,7 @@ change to the API or to a provider's documented behaviour needs a new major vers
 - **Releases only with the owner's go-ahead.** A release (`release:prepare`/`release:perform`, an upload to the
   Central Portal) is made by the owner or on his explicit word, and `CHANGELOG.md` gets its entry first.
 - **Publishing.** Releases go only to Maven Central, by hand, through the Central Portal (profiles `central,sign`),
-  tagged `v<version>` (`v4.0.0` is the first; older tags stay), as [docs/releasing.md](../docs/releasing.md)
+  tagged `v<version>` (`v4.0.0` is the first; older tags stay), as [RELEASING.md](../RELEASING.md)
   describes; the `central` profile's enforcer refuses a SNAPSHOT version or a SNAPSHOT dependency. CI publishes nothing to
   Maven Central. Maven 3.10 sends a server's credentials only to the hosts it knows for that id, and the id `central`
   is bound to Maven Central, so the server `central` in `~/.m2/settings.xml` must list `https://central.sonatype.com`

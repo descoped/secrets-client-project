@@ -75,7 +75,7 @@ Without just, the same with Maven: `./mvnw verify`, `./mvnw verify javadoc:javad
   accounts only when their variables are set, never in CI.
 - Pull requests run CI (build, tests, Javadoc, smoke test) and an automated review; SonarCloud analyses pushes and
   pull requests from this repository, without gating the build. Releases are
-  published to Maven Central by hand ([releasing](docs/releasing.md)). SNAPSHOTs of `master`, and of a branch when run by hand
+  published to Maven Central by hand ([releasing](RELEASING.md)). SNAPSHOTs of `master`, and of a branch when run by hand
   (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/`, never to Maven Central (see [getting started](docs/getting-started.md)).
 
 ## License
