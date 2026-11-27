@@ -122,8 +122,8 @@ class MountedClientTest {
 
     /**
      * Reads racing Kubernetes-style rotations: a file resolved through {@code ..data} can be gone when it is opened.
-     * A stress test, not a deterministic one: without the provider's second resolve it fails in most runs (4 of 6
-     * measured), with it in none.
+     * A stress test, not a deterministic one, with rotations far more frequent than Kubernetes makes: without the
+     * provider's retries it fails in most runs, with them in none measured.
      */
     @Test
     void aRotationDuringAReadIsNotReportedAsMissing() throws Exception {

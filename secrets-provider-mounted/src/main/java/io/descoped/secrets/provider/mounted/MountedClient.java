@@ -39,6 +39,8 @@ final class MountedClient implements SecretManagerClient {
     private static final String SECRET_NAME = "secretName";
     private static final String SECRET_VALUE = "secretValue";
     private static final long INITIAL = 4096;
+    /** How many times a name is resolved and opened before a file that vanishes in between is reported missing. */
+    private static final int ATTEMPTS = 3;
 
     private final Path directory;
     private final SecretMemory memory;
@@ -66,15 +68,15 @@ final class MountedClient implements SecretManagerClient {
             if (!(secretVersion == null || LATEST.equals(secretVersion)) || !isValidName(secretName)) {
                 throw new SecretNotFoundException(secretName, secretVersion);
             }
-            try {
-                return readFile(secretName, file(secretName, secretVersion));
-            } catch (NoSuchFileException _) {
-                // Kubernetes swaps its ..data link and then removes the old files: a file resolved during the swap,
-                // or just before it, is gone when it is resolved or opened. Resolving again finds the new one.
+            // Kubernetes swaps its ..data link and then removes the old files: a file resolved during the swap, or just
+            // before it, is gone when it is resolved or opened. Resolving again finds the new one.
+            for (int attempt = 1; ; attempt++) {
                 try {
                     return readFile(secretName, file(secretName, secretVersion));
-                } catch (NoSuchFileException _) {
-                    throw new SecretNotFoundException(secretName, secretVersion);
+                } catch (NoSuchFileException e) {
+                    if (attempt == ATTEMPTS) {
+                        throw new SecretNotFoundException(secretName, secretVersion, e);
+                    }
                 }
             }
         } finally {

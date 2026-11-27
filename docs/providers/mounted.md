@@ -52,8 +52,8 @@ try (Secret password = client.read("db-password")) {
 - The only version is `latest` (or `null`): the platform chooses the version when it mounts the volume. Another
   version, a missing file and a directory are `SecretNotFoundException`.
 - Files are read on every `read`, never cached. A value the platform rotates in place, as Kubernetes does, is seen at
-  the next read. A read that races a rotation, and finds the file it resolved already removed, resolves the name once
-  more before it reports the secret as missing.
+  the next read. A read that races a rotation, and finds the file it resolved already removed, resolves the name again,
+  up to three times in all, before it reports the secret as missing.
 - The file is opened without following a link, after its real path was checked to be inside the directory.
 - A file that does not end (a FIFO without a writer, a mount that hangs) blocks the read, and `close()` waits for
   reads in progress.
@@ -82,3 +82,12 @@ key or object alias is a file there.
 
 `MountedCanaryTest` runs the canary gate: a child JVM reads the canary through the provider, also from a FIFO
 through the buffer that grows, and its heap dump must not hold it.
+
+`MountedSecretLiveTest`, in the Google Secret Manager provider's tests, is the live test on Cloud Run. Its job is
+not run in CI, and its infrastructure lives outside this repository. The job mounts a Secret Manager secret as
+`latest` and runs only this class. The test reads the file through this provider and the same secret from Secret
+Manager, then compares the two. Its settings:
+- `SECRETS_MOUNTED_TEST_DIRECTORY`: the mount's parent directory;
+- `SECRETS_MOUNTED_TEST_NAME`: the path under it, default `live/value`;
+- `SECRETS_MOUNTED_TEST_SECRET`: the secret, default `secrets-client-live-test`;
+- the Google live test's project and credentials variables.
