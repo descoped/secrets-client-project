@@ -13,6 +13,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
@@ -25,6 +26,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Random;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -104,7 +106,15 @@ class SecretMemoryReadTest {
     }
 
     @Test
-    void failuresArePassedOn() throws IOException {
+    void aNonBlockingChannelIsRefused() throws IOException {
+        try (java.nio.channels.Pipe.SourceChannel source = java.nio.channels.Pipe.open().source()) {
+            source.configureBlocking(false);
+            assertThrows(IllegalArgumentException.class, () -> memory.read(source, 10));
+        }
+    }
+
+    @Test
+    void failuresArePassedOn() {
         ReadableByteChannel failing = new ReadableByteChannel() {
             @Override
             public int read(ByteBuffer dst) throws IOException {
@@ -150,15 +160,18 @@ class SecretMemoryReadTest {
             return;
         }
         try (FileChannel channel = direct) {
-            // The failure: straight into memfd_secret pages (a fresh, page-aligned slab), the kernel refuses.
+            // The failure: straight into memfd_secret pages, the kernel refuses. Direct I/O needs a block-aligned
+            // buffer: 64 KiB is more than the first slab (one page) holds, so it gets a slab of its own and starts on
+            // a page boundary. A change to how slabs place blocks would have to keep that, or this test changes.
+            Consumer<MemorySegment> straightIn = segment -> {
+                try {
+                    channel.read(segment.asByteBuffer(), 0);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            };
             UncheckedIOException refused = assertThrows(UncheckedIOException.class,
-                    () -> memory.allocate(content.length, segment -> {
-                        try {
-                            channel.read(segment.asByteBuffer(), 0);
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    }).close());
+                    () -> memory.allocate(content.length, straightIn));
             assertEquals("Bad address", refused.getCause().getMessage());
             // The way out: read() of the same file, as many bytes as it has (direct I/O reads whole blocks).
             channel.position(0);

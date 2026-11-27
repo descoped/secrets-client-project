@@ -7,8 +7,10 @@ its secrets: the platform fetches them and mounts them. Where the platform offer
 - **GKE and EKS** have the Secrets Store CSI driver, with the Google Secret Manager and AWS Secrets Manager providers.
 - **Kubernetes** mounts its own secrets as a volume.
 
-Each `read` opens the file and reads it with a `FileChannel` straight into guarded memory: the value is never on the
-Java heap unless the caller asks for a heap copy (`readBytes`, `readChars`, `readString`).
+Each `read` opens the file and reads it with a `FileChannel` into guarded memory, through
+[`SecretMemory.read`](../api.md#guarded-memory-secretmemory-and-secret). On Linux `memfd_secret` memory, that read
+goes through a small guarded buffer, because Cloud Run's FUSE volumes cannot fill those pages directly. The value is
+never on the Java heap unless the caller asks for a heap copy (`readBytes`, `readChars`, `readString`).
 
 - Maven: `io.descoped.secrets:secrets-provider-mounted`, scope `runtime`
 - Provider name: `mounted`

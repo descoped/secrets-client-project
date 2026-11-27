@@ -16,6 +16,7 @@ import java.lang.ref.Cleaner;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.SelectableChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -73,6 +74,8 @@ public final class SecretMemory implements AutoCloseable {
 
     private static final System.Logger LOG = System.getLogger(SecretMemory.class.getName());
     private static final AtomicBoolean BACKING_LOGGED = new AtomicBoolean();
+    /** Unlocked memory is logged once per JVM, not once per memory: a read's bounce buffer is memory of its own. */
+    private static final AtomicBoolean UNLOCKED_LOGGED = new AtomicBoolean();
 
     private final Pool pool;
     private final Cleaner.Cleanable cleanable;
@@ -191,13 +194,15 @@ public final class SecretMemory implements AutoCloseable {
      * {@code EFAULT} ("Bad address"): a file served through FUSE or virtiofs, as Cloud Run's secret volumes are, or
      * one opened for direct I/O. This method reads such memory through a small buffer of guarded, locked, ordinary
      * pages, which it wipes and unmaps before it returns. Elsewhere it reads straight into the secret. It reads in
-     * the calling thread; a channel that blocks, blocks it.
+     * the calling thread; a channel that blocks, blocks it. The bounce buffer is locked like any other guarded memory,
+     * so a read needs up to 64 KiB of locked memory besides the secrets.
      *
      * @param channel   the channel, read from its current position; not closed
      * @param maxLength the most bytes to read
      * @return the secret, to close when it is no longer needed
      * @throws IOException              if the channel fails
-     * @throws IllegalArgumentException if {@code maxLength} is negative or more than {@link Integer#MAX_VALUE}
+     * @throws IllegalArgumentException if {@code maxLength} is negative or more than {@link Integer#MAX_VALUE}, or the
+     *                                  channel is in non-blocking mode
      * @throws IllegalStateException    if the memory is closed
      * @throws SecretManagerException   if more memory is needed and cannot be mapped or locked
      * @throws NullPointerException     if {@code channel} is {@code null}
@@ -207,44 +212,72 @@ public final class SecretMemory implements AutoCloseable {
         if (maxLength < 0 || maxLength > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Invalid maximum length " + maxLength);
         }
-        SecretMemory bounce = null;
-        if (pool.pinRefused()) {
-            Pool pages = new Pool(pool.os, pool.lockRequired, false);
-            pages.start();
-            bounce = new SecretMemory(pages);
+        if (channel instanceof SelectableChannel selectable && !selectable.isBlocking()) {
+            throw new IllegalArgumentException("The channel must be in blocking mode");
+        }
+        if (pool.closed) {
+            throw new IllegalStateException("Secret memory is closed");
+        }
+        Pool bouncePool = null;
+        Block bounceBlock = null;
+        if (pool.pinRefused() && maxLength > 0) {
+            // A pool of its own, not started: its one slab is mapped for the bounce block alone.
+            bouncePool = new Pool(pool.os, pool.lockRequired, false);
+            bounceBlock = bouncePool.take(Math.min(Reader.BOUNCE, maxLength));
+        }
+        Throwable failure = null;
+        try {
+            return new Reader(this, bounceBlock, channel, maxLength).read();
+        } catch (UncheckedIOException e) {
+            failure = e.getCause();
+            throw e.getCause();
+        } catch (RuntimeException | Error e) {
+            failure = e;
+            throw e;
+        } finally {
+            closeBounce(bouncePool, bounceBlock, failure);
+        }
+    }
+
+    /** Wipes and unmaps the bounce memory; a failure to do so is added to {@code failure}, or thrown if none. */
+    private static void closeBounce(Pool bouncePool, Block bounceBlock, Throwable failure) {
+        if (bouncePool == null) {
+            return;
         }
         try {
-            return new Reader(this, bounce, channel, maxLength).read();
-        } catch (UncheckedIOException e) {
-            throw e.getCause();
-        } finally {
-            if (bounce != null) {
-                bounce.close();
+            bounceBlock.close();
+            bouncePool.close();
+        } catch (RuntimeException e) {
+            if (failure == null) {
+                throw e;
             }
+            failure.addSuppressed(e);
         }
     }
 
     /** One {@link #read(ReadableByteChannel, long)}: into a buffer that doubles until the end, then the exact size. */
     private static final class Reader {
         private static final long INITIAL = 4096;
-        private static final long BOUNCE = 64L * 1024;
+        static final long BOUNCE = 64L * 1024;
 
         private final SecretMemory memory;
-        private final SecretMemory bounce;
+        /** Ordinary pages the channel reads into, for memory the kernel cannot pin; {@code null} otherwise. */
+        private final Block bounceBlock;
         private final ReadableByteChannel channel;
         private final long maxLength;
         private long filled;
         private boolean ended;
 
-        Reader(SecretMemory memory, SecretMemory bounce, ReadableByteChannel channel, long maxLength) {
+        Reader(SecretMemory memory, Block bounceBlock, ReadableByteChannel channel, long maxLength) {
             this.memory = memory;
-            this.bounce = bounce;
+            this.bounceBlock = bounceBlock;
             this.channel = channel;
             this.maxLength = maxLength;
         }
 
         Secret read() {
-            Secret buffer = memory.allocate(Math.min(maxLength, Math.max(INITIAL, sizeHint())), this::fill);
+            Secret buffer = memory.allocate(Math.clamp(sizeHint(), Math.min(INITIAL, maxLength), maxLength),
+                    this::fill);
             try {
                 while (!ended && filled == buffer.length() && buffer.length() < maxLength) {
                     Secret old = buffer;
@@ -267,7 +300,7 @@ public final class SecretMemory implements AutoCloseable {
             }
         }
 
-        /** What a file has left, plus one byte to see its end; nothing for a channel of unknown size (a FIFO). */
+        /** What a file has left, plus one byte to see its end; {@value #INITIAL} for a channel of unknown size. */
         private long sizeHint() {
             if (channel instanceof FileChannel file) {
                 try {
@@ -283,7 +316,7 @@ public final class SecretMemory implements AutoCloseable {
         private void fill(MemorySegment segment) {
             try {
                 while (!ended && filled < segment.byteSize()) {
-                    long n = bounce == null ? readInto(segment) : readThroughBounce(segment);
+                    long n = bounceBlock == null ? readInto(segment) : readThroughBounce(segment);
                     if (n < 0) {
                         ended = true;
                     } else {
@@ -296,25 +329,25 @@ public final class SecretMemory implements AutoCloseable {
         }
 
         private long readInto(MemorySegment segment) throws IOException {
-            ByteBuffer target = segment.asSlice(filled).asByteBuffer();
-            return channel.read(target);
+            return channel.read(segment.asSlice(filled).asByteBuffer());
         }
 
+        /** Reads into the bounce block, copies what came into {@code segment}, and zeroes it in the bounce block. */
         private long readThroughBounce(MemorySegment segment) {
-            long room = Math.min(BOUNCE, segment.byteSize() - filled);
-            long[] n = {0};
+            long room = Math.min(bounceBlock.length, segment.byteSize() - filled);
             long at = filled;
-            // The bounce secret is only for the transfer: its pages are wiped when it is closed.
-            bounce.allocate(room, pages -> {
+            long[] n = {0};
+            bounceBlock.write(pages -> {
                 try {
-                    n[0] = channel.read(pages.asByteBuffer());
+                    n[0] = channel.read(pages.asSlice(0, room).asByteBuffer());
                 } catch (IOException e) {
                     throw new UncheckedIOException(e);
                 }
                 if (n[0] > 0) {
                     MemorySegment.copy(pages, 0, segment, at, n[0]);
+                    pages.asSlice(0, n[0]).fill((byte) 0);
                 }
-            }).close();
+            });
             return n[0];
         }
     }
@@ -425,7 +458,6 @@ public final class SecretMemory implements AutoCloseable {
         private final ReentrantLock lock = new ReentrantLock();
         private final List<Slab> slabs = new ArrayList<>();
         private final Set<Block> live = new LinkedHashSet<>();
-        private boolean unlockedLogged;
         private volatile boolean closed;
         private volatile boolean closedExplicitly;
 
@@ -524,8 +556,7 @@ public final class SecretMemory implements AutoCloseable {
                             : "Cannot map guarded secret memory: " + e.getMessage(), e);
                 }
                 logBacking(slab);
-                if (!slab.locked() && !unlockedLogged) {
-                    unlockedLogged = true;
+                if (!slab.locked() && UNLOCKED_LOGGED.compareAndSet(false, true)) {
                     LOG.log(System.Logger.Level.WARNING, "Secret memory could not be locked and may be swapped ("
                             + LOCK_KEY + "=preferred); raise the locked-memory limit (RLIMIT_MEMLOCK) to lock it");
                 }

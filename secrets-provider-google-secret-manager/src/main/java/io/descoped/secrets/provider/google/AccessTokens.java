@@ -292,7 +292,7 @@ final class AccessTokens implements AutoCloseable {
         }
 
         /** The largest credentials file read. */
-        private static final long MAX_FILE = 1024 * 1024;
+        private static final long MAX_FILE = 1024L * 1024;
 
         private static Secret read(Path file, SecretMemory memory) {
             try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {

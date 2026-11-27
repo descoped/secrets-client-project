@@ -31,6 +31,8 @@ final class SecretsFile {
     private static final byte[] UTF8_BOM = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
     private static final byte[] LF = {'\n'};
     private static final byte[] CRLF = {'\r', '\n'};
+    /** The largest secrets file read. */
+    static final long MAX_SIZE = Integer.MAX_VALUE - 1L;
 
     private SecretsFile() {
     }
@@ -46,9 +48,6 @@ final class SecretsFile {
             return contentEnd - valueStart;
         }
     }
-
-    /** The largest secrets file read. */
-    static final long MAX_SIZE = Integer.MAX_VALUE - 1L;
 
     /**
      * Reads the whole of {@code file} into a new secret, through {@link SecretMemory#read}.
