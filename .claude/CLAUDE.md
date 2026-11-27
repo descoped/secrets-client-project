@@ -96,7 +96,8 @@ change to the API or to a provider's documented behaviour needs a new major vers
 
 ## Commands
 
-The `justfile` holds every regular task; `just` lists them. It finds the baseline JDK itself (`.java-version`).
+The `justfile` holds every regular task; `just` lists them. It uses `JAVA_HOME`, or on macOS finds the JDK of
+`.java-version`, and every recipe that builds fails unless the JDK in use is that baseline.
 
 ```sh
 just build                       # compile with -Xlint:all -Werror, tests (JUnit 6)
@@ -106,7 +107,7 @@ just repeat <module> <pattern> [n]  # a test n times in a row, one result per ru
 just coverage [module]           # JaCoCo per module in <module>/target/site/jacoco, a summary of one
 just smoke                       # JPMS smoke test: every provider on the module path and the class path; jdeps
 just linux [modules] [tests]     # the tests on Linux in Docker, where memfd_secret is in use
-just live-google                 # the Google live test (needs SECRETS_GOOGLE_TEST_PROJECT and _CREDENTIALS_PATH)
+just live-google                 # the Google live test (needs SECRETS_GOOGLE_TEST_PROJECT)
 just checks|wait|review|sonar <pr>  # a pull request's checks, waiting for them, the Claude review, SonarCloud
 just ci-log <run>                # the failing lines of a CI run
 ```
