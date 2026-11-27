@@ -40,6 +40,7 @@ const landing = defineCollection({
     'TLS that never touches the heap',
     'Credentials get the same care',
     'One API, the backend you choose',
+    'Nothing else on your class path',
     'Proven by dumping the heap',
     'Add it to your project',
     'Read your first secret',

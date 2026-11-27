@@ -9,6 +9,11 @@ keys that grant access to them, are held in guarded memory off the Java heap, ov
 needed, and never appear in exception messages. Every path is proven by heap-dump tests. Java 25 or later, on Linux
 or macOS, on the module path or the class path.
 
+No third-party dependency: no cloud SDK, no gRPC, no Netty, no Jackson. TLS, HTTP/1.1, JSON, Base64, SigV4 and the
+OAuth and metadata calls are the library's own code, on the JDK and the system's OpenSSL 3. At runtime an
+application gets the API, the providers it uses, and Descoped's 9 KB
+[service-provider-api](https://github.com/descoped/service-provider-api).
+
 **[Documentation](https://ssc.descoped.io)** (the same pages are in [docs/](docs/README.md)): getting started, the
 API, the architecture, the protocols, the topology, the deployment models, the sequence flows,
 [the security model](docs/security.md), each provider, and migrating from earlier versions.
@@ -44,9 +49,9 @@ One Maven reactor; every module shares the version of the root POM.
 ```
 secrets-client-api/                        the API and the provider service
 secrets-provider-safe-configuration/       provider: a local key=value file, for development and tests
-secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST, no dependency but the API)
+secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST API)
 secrets-provider-mounted/                  provider: secrets the platform mounts as files, read-only
-secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API, SigV4; no dependency but the API)
+secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API, signed with SigV4)
 secrets-client-bom/                        BOM of the modules above
 secrets-test-support/                      test support: the canary heap-dump harness (never published)
 src/it/consumer/                           JPMS smoke test: an application using every provider
