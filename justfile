@@ -1,8 +1,7 @@
 # secrets-client-project development recipes. Run `just` to list them.
 #
 # Everything here only builds, tests or reads. What publishes or changes something outside the working tree (push,
-# pull request, merge, comment, release) is not a recipe: it is run by hand, and Claude Code asks first
-# (.claude/settings.json allows these recipes by name, nothing else).
+# pull request, merge, comment, release) is not a recipe.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set quiet
