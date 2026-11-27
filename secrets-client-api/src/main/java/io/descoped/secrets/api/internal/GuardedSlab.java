@@ -26,9 +26,11 @@ public final class GuardedSlab extends Slab {
      * Maps a slab of at least {@code capacity} bytes, rounded up to whole pages.
      *
      * @param lockRequired whether failing to lock the pages is an error; if not, the slab is just not locked
+     * @param hide         whether to use {@code memfd_secret} memory where the kernel offers it; {@code false} for
+     *                     memory the kernel must be able to pin, such as a buffer for a read from a FUSE file
      * @throws NativeException if the memory cannot be mapped or protected, or locked when that is required
      */
-    public GuardedSlab(Native os, long capacity, boolean lockRequired) {
+    public GuardedSlab(Native os, long capacity, boolean lockRequired, boolean hide) {
         long page = os.pageSize();
         long length = Math.max(1, (capacity + page - 1) / page) * page;
         super(length);
@@ -40,7 +42,7 @@ public final class GuardedSlab extends Slab {
         boolean isExcluded = false;
         boolean isHidden = false;
         try {
-            if (os.secretMemoryAvailable()) {
+            if (hide && os.secretMemoryAvailable()) {
                 isHidden = hide(os, dataAddress, length);
             }
             if (!isHidden) {

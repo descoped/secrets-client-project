@@ -7,10 +7,15 @@ import io.descoped.secrets.api.internal.PlainSlab;
 import io.descoped.secrets.api.internal.Slab;
 import io.descoped.secrets.api.internal.Utf8;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.lang.ref.Cleaner;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.ReadableByteChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -119,7 +124,7 @@ public final class SecretMemory implements AutoCloseable {
             }
             os = Native.get();
         }
-        Pool pool = new Pool(os, lockRequired);
+        Pool pool = new Pool(os, lockRequired, true);
         pool.start();
         return new SecretMemory(pool);
     }
@@ -173,6 +178,144 @@ public final class SecretMemory implements AutoCloseable {
             secret.close();
         } catch (RuntimeException _) {
             // See allocate.
+        }
+    }
+
+    /**
+     * Reads {@code channel} to its end, or {@code maxLength} bytes if it has more, into a new secret of exactly the
+     * length read. The data reaches only guarded memory, never the Java heap. A caller that must know whether the
+     * channel had more asks for one byte more than it accepts.
+     *
+     * <p>Use this rather than reading into {@link #allocate} with the channel yourself. Where this memory comes from
+     * {@code memfd_secret} (Linux), the kernel cannot pin its pages, and a read that pins the destination fails with
+     * {@code EFAULT} ("Bad address"): a file served through FUSE or virtiofs, as Cloud Run's secret volumes are, or
+     * one opened for direct I/O. This method reads such memory through a small buffer of guarded, locked, ordinary
+     * pages, which it wipes and unmaps before it returns. Elsewhere it reads straight into the secret. It reads in
+     * the calling thread; a channel that blocks, blocks it.
+     *
+     * @param channel   the channel, read from its current position; not closed
+     * @param maxLength the most bytes to read
+     * @return the secret, to close when it is no longer needed
+     * @throws IOException              if the channel fails
+     * @throws IllegalArgumentException if {@code maxLength} is negative or more than {@link Integer#MAX_VALUE}
+     * @throws IllegalStateException    if the memory is closed
+     * @throws SecretManagerException   if more memory is needed and cannot be mapped or locked
+     * @throws NullPointerException     if {@code channel} is {@code null}
+     */
+    public Secret read(ReadableByteChannel channel, long maxLength) throws IOException {
+        Objects.requireNonNull(channel, "channel");
+        if (maxLength < 0 || maxLength > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Invalid maximum length " + maxLength);
+        }
+        SecretMemory bounce = null;
+        if (pool.pinRefused()) {
+            Pool pages = new Pool(pool.os, pool.lockRequired, false);
+            pages.start();
+            bounce = new SecretMemory(pages);
+        }
+        try {
+            return new Reader(this, bounce, channel, maxLength).read();
+        } catch (UncheckedIOException e) {
+            throw e.getCause();
+        } finally {
+            if (bounce != null) {
+                bounce.close();
+            }
+        }
+    }
+
+    /** One {@link #read(ReadableByteChannel, long)}: into a buffer that doubles until the end, then the exact size. */
+    private static final class Reader {
+        private static final long INITIAL = 4096;
+        private static final long BOUNCE = 64L * 1024;
+
+        private final SecretMemory memory;
+        private final SecretMemory bounce;
+        private final ReadableByteChannel channel;
+        private final long maxLength;
+        private long filled;
+        private boolean ended;
+
+        Reader(SecretMemory memory, SecretMemory bounce, ReadableByteChannel channel, long maxLength) {
+            this.memory = memory;
+            this.bounce = bounce;
+            this.channel = channel;
+            this.maxLength = maxLength;
+        }
+
+        Secret read() {
+            Secret buffer = memory.allocate(Math.min(maxLength, Math.max(INITIAL, sizeHint())), this::fill);
+            try {
+                while (!ended && filled == buffer.length() && buffer.length() < maxLength) {
+                    Secret old = buffer;
+                    buffer = memory.allocate(Math.min(maxLength, old.length() * 2), segment -> old.withSegment(
+                            from -> {
+                                MemorySegment.copy(from, 0, segment, 0, filled);
+                                fill(segment);
+                                return null;
+                            }));
+                    old.close();
+                }
+                Secret current = buffer;
+                long length = filled;
+                return memory.allocate(length, out -> current.withSegment(from -> {
+                    MemorySegment.copy(from, 0, out, 0, length);
+                    return null;
+                }));
+            } finally {
+                buffer.close();
+            }
+        }
+
+        /** What a file has left, plus one byte to see its end; nothing for a channel of unknown size (a FIFO). */
+        private long sizeHint() {
+            if (channel instanceof FileChannel file) {
+                try {
+                    return file.size() - file.position() + 1;
+                } catch (IOException _) {
+                    // A FIFO or a device has no size or position: read and grow.
+                }
+            }
+            return INITIAL;
+        }
+
+        /** Reads into {@code segment} from {@link #filled} until it is full or the channel ends. */
+        private void fill(MemorySegment segment) {
+            try {
+                while (!ended && filled < segment.byteSize()) {
+                    long n = bounce == null ? readInto(segment) : readThroughBounce(segment);
+                    if (n < 0) {
+                        ended = true;
+                    } else {
+                        filled += n;
+                    }
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+
+        private long readInto(MemorySegment segment) throws IOException {
+            ByteBuffer target = segment.asSlice(filled).asByteBuffer();
+            return channel.read(target);
+        }
+
+        private long readThroughBounce(MemorySegment segment) {
+            long room = Math.min(BOUNCE, segment.byteSize() - filled);
+            long[] n = {0};
+            long at = filled;
+            // The bounce secret is only for the transfer: its pages are wiped when it is closed.
+            bounce.allocate(room, pages -> {
+                try {
+                    n[0] = channel.read(pages.asByteBuffer());
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+                if (n[0] > 0) {
+                    MemorySegment.copy(pages, 0, segment, at, n[0]);
+                }
+            }).close();
+            return n[0];
         }
     }
 
@@ -277,6 +420,8 @@ public final class SecretMemory implements AutoCloseable {
 
         private final Native os;
         private final boolean lockRequired;
+        /** Whether slabs use {@code memfd_secret} memory where the kernel offers it. */
+        private final boolean hide;
         private final ReentrantLock lock = new ReentrantLock();
         private final List<Slab> slabs = new ArrayList<>();
         private final Set<Block> live = new LinkedHashSet<>();
@@ -284,9 +429,15 @@ public final class SecretMemory implements AutoCloseable {
         private volatile boolean closed;
         private volatile boolean closedExplicitly;
 
-        private Pool(Native os, boolean lockRequired) {
+        private Pool(Native os, boolean lockRequired, boolean hide) {
             this.os = os;
             this.lockRequired = lockRequired;
+            this.hide = hide;
+        }
+
+        /** Whether new slabs come from {@code memfd_secret}, whose pages the kernel cannot pin. */
+        private boolean pinRefused() {
+            return os != null && hide && os.secretMemoryAvailable();
         }
 
         /** Maps the first slab, so that a missing permission or limit is reported at once. */
@@ -364,7 +515,7 @@ public final class SecretMemory implements AutoCloseable {
                 slab = new PlainSlab(Math.max(PLAIN_SLAB_SIZE, size));
             } else {
                 try {
-                    slab = new GuardedSlab(os, Math.max(os.pageSize(), size), lockRequired);
+                    slab = new GuardedSlab(os, Math.max(os.pageSize(), size), lockRequired, hide);
                 } catch (NativeException e) {
                     throw new SecretManagerException(e.call().equals("mlock")
                             ? "Cannot lock secret memory (" + e.getMessage() + "): the process is over its"

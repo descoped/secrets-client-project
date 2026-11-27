@@ -158,7 +158,11 @@ try (SecretMemory memory = SecretMemory.create(configuration);
   unless a seccomp filter blocks it), the pages come from it and are removed from the kernel's direct map, so not even
   the kernel reaches them by accident. Otherwise anonymous pages are used, and that is logged once.
   `SecretMemory.isHiddenFromKernel()` says which. While any `memfd_secret` memory exists, Linux refuses to hibernate
-  (suspend to disk), which matters on a desktop or laptop.
+  (suspend to disk), which matters on a desktop or laptop. The kernel cannot pin `memfd_secret` pages either, so a
+  read that pins its destination fails on them with `EFAULT` ("Bad address"). Such reads include a file served through
+  FUSE or virtiofs (Cloud Run's secret volumes) and direct I/O. Read files and other channels with
+  `SecretMemory.read(channel, maxLength)`, which reads such memory through a small buffer of guarded, locked, ordinary
+  pages, wiped and unmapped before it returns. Every provider reads its files this way.
 - **Wiped** when a secret is closed, and wiped and unmapped when the memory is closed. A secret that becomes
   unreachable without being closed is wiped when the garbage collector finds it, and that is logged.
 
