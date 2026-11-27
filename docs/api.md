@@ -75,7 +75,8 @@ public interface SecretManagerClient extends AutoCloseable {
 ```
 
 What a version id looks like depends on the provider: the file-based providers have only `latest`; Google Secret
-Manager has `latest` and version numbers.
+Manager has `latest` and version numbers; AWS Secrets Manager has `latest`, version IDs and staging labels such as
+`AWSPREVIOUS`.
 
 Values go in and out only as a `Secret`. To write a value the application holds as characters or bytes, copy it into
 guarded memory first; `fromChars` and `fromBytes` wipe the array they are given:
@@ -166,7 +167,8 @@ The value is reached only inside a callback:
   UTF-8 itself, without the JDK's charset decoders, which keep heap buffers of their own.
 
 The hand-over is where the library's reach ends: a consumer that keeps its own copy of the array, or makes a `String`
-of it, keeps the value on the heap.
+of it, keeps the value on the heap. [The security model](security.md) lists what guarded memory protects against
+and what it does not.
 
 **Native access.** Guarded memory calls the C library (`mmap`, `mprotect`, `mlock`, `munlock`, `munmap`, `madvise`,
 `getpagesize`; on Linux also `ftruncate`, `close`, and `syscall` for `memfd_secret` and `getrandom`, which a seccomp

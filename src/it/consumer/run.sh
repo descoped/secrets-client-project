@@ -48,3 +48,8 @@ java --enable-native-access=io.descoped.secrets.api --module-path "$out/lib:$out
 
 echo "== class path"
 java --enable-native-access=ALL-UNNAMED --class-path "$out/lib/*:$out/classes/consumer" consumer.Main classpath
+
+# Without the flag, a client must refuse to start, never run unguarded.
+echo "== without native access"
+java --module-path "$out/lib:$out/classes" --module consumer/consumer.Main module-without-native-access
+java --class-path "$out/lib/*:$out/classes/consumer" consumer.Main classpath-without-native-access

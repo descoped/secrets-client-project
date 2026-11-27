@@ -21,6 +21,10 @@ public final class Main {
 
     public static void main(String[] args) throws IOException {
         String mode = args.length > 0 ? args[0] : "?";
+        if (mode.endsWith("-without-native-access")) {
+            refused(mode);
+            return;
+        }
         Path file = Files.createTempFile("secrets", ".properties");
         try {
             Files.writeString(file, "answer=42\n");
@@ -92,6 +96,20 @@ public final class Main {
                 fail("aws-secrets-manager: " + e);
             }
             System.out.println("OK " + mode + " aws-secrets-manager missing credentials reported");
+        }
+    }
+
+    /** Without {@code --enable-native-access}, a client refuses to start rather than run unguarded. */
+    private static void refused(String mode) {
+        try (SecretManagerClient client = SecretManagerClient.create(Map.of(
+                "secrets.provider", "mounted",
+                "secrets.mounted.directory", System.getProperty("java.io.tmpdir")))) {
+            fail(mode + ": a client started without native access (" + client.getClass().getSimpleName() + ")");
+        } catch (SecretManagerException e) {
+            if (!e.getMessage().startsWith("Guarded memory needs native access")) {
+                fail(mode + ": " + e);
+            }
+            System.out.println("OK " + mode + " refused");
         }
     }
 
