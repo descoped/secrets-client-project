@@ -1,4 +1,4 @@
-package io.descoped.secrets.provider.google;
+package io.descoped.secrets.api.http;
 
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
@@ -10,53 +10,90 @@ import java.util.Map;
 
 /**
  * A JSON reader (RFC 8259, strict about structure and escapes; bytes above 0x7F are not checked as UTF-8) over a
- * segment, for the few response shapes this provider reads. It copies nothing:
+ * segment, for the few response shapes the providers read. It copies nothing:
  * strings and numbers are spans of the segment, so a secret in a string is decoded by the caller straight from the
  * segment into guarded memory ({@link Codec#unescape}). Only object keys, which are never secret, are put on the heap.
  * Errors never quote the input.
  */
-final class Json {
+public final class Json {
 
     /** Nesting deeper than this is refused. */
     private static final int MAX_DEPTH = 32;
 
     /** A JSON value. */
-    sealed interface Node permits Obj, Arr, Str, Num, Lit {
+    public sealed interface Node permits Obj, Arr, Str, Num, Lit {
     }
 
-    /** An object; its keys are unique. */
-    record Obj(Map<String, Node> fields) implements Node {
+    /**
+     * An object; its keys are unique.
+     *
+     * @param fields the fields by name
+     */
+    public record Obj(Map<String, Node> fields) implements Node {
 
-        /** The field {@code name} if it is a string, else {@code null}. */
-        Str string(String name) {
+        /**
+         * The field {@code name} if it is a string.
+         *
+         * @param name the field's name
+         * @return the string, or {@code null} if it is absent or not a string
+         */
+        public Str string(String name) {
             return fields.get(name) instanceof Str s ? s : null;
         }
 
-        /** The field {@code name} if it is an object, else {@code null}. */
-        Obj object(String name) {
+        /**
+         * The field {@code name} if it is an object.
+         *
+         * @param name the field's name
+         * @return the object, or {@code null} if it is absent or not an object
+         */
+        public Obj object(String name) {
             return fields.get(name) instanceof Obj o ? o : null;
         }
     }
 
-    /** An array. */
-    record Arr(List<Node> elements) implements Node {
+    /**
+     * An array.
+     *
+     * @param elements the elements in order
+     */
+    public record Arr(List<Node> elements) implements Node {
     }
 
-    /** A string: its content between the quotes, still escaped, at {@code [start, end)}. */
-    record Str(long start, long end) implements Node {
+    /**
+     * A string: its content between the quotes, still escaped, at {@code [start, end)}.
+     *
+     * @param start the offset of the first byte after the opening quote
+     * @param end   the offset of the closing quote
+     */
+    public record Str(long start, long end) implements Node {
 
-        /** The escaped content, a slice of {@code json}. */
-        MemorySegment raw(MemorySegment json) {
+        /**
+         * The escaped content, a slice of {@code json}.
+         *
+         * @param json the JSON this string was parsed from
+         * @return the slice
+         */
+        public MemorySegment raw(MemorySegment json) {
             return json.asSlice(start, end - start);
         }
     }
 
-    /** A number at {@code [start, end)}. */
-    record Num(long start, long end) implements Node {
+    /**
+     * A number at {@code [start, end)}.
+     *
+     * @param start the offset of its first character
+     * @param end   the offset after its last character
+     */
+    public record Num(long start, long end) implements Node {
     }
 
-    /** {@code true}, {@code false} or {@code null}. */
-    record Lit(String value) implements Node {
+    /**
+     * {@code true}, {@code false} or {@code null}.
+     *
+     * @param value the literal
+     */
+    public record Lit(String value) implements Node {
     }
 
     private final MemorySegment json;
@@ -69,9 +106,11 @@ final class Json {
     /**
      * Parses {@code json}, which must hold exactly one value (surrounded by whitespace at most).
      *
+     * @param json the JSON, in place
+     * @return the value; strings and numbers refer back to {@code json}
      * @throws Codec.MalformedException if it is not valid JSON
      */
-    static Node parse(MemorySegment json) throws Codec.MalformedException {
+    public static Node parse(MemorySegment json) throws Codec.MalformedException {
         Json reader = new Json(json);
         reader.skipWhitespace();
         Node node = reader.value(0);
@@ -85,17 +124,26 @@ final class Json {
     /**
      * A string that is not secret, as a Java string.
      *
+     * @param json the JSON {@code str} was parsed from
+     * @param str  the string
+     * @return the unescaped text
      * @throws Codec.MalformedException if an escape is invalid
      */
-    static String text(MemorySegment json, Str str) throws Codec.MalformedException {
+    public static String text(MemorySegment json, Str str) throws Codec.MalformedException {
         MemorySegment raw = str.raw(json);
         byte[] bytes = new byte[Math.toIntExact(Codec.unescapedLength(raw))];
         Codec.unescape(raw, MemorySegment.ofArray(bytes));
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
-    /** A number that is not secret, as a Java string. */
-    static String text(MemorySegment json, Num num) {
+    /**
+     * A number that is not secret, as a Java string.
+     *
+     * @param json the JSON {@code num} was parsed from
+     * @param num  the number
+     * @return its text
+     */
+    public static String text(MemorySegment json, Num num) {
         return new String(json.asSlice(num.start(), num.end() - num.start()).toArray(ValueLayout.JAVA_BYTE),
                 StandardCharsets.US_ASCII);
     }

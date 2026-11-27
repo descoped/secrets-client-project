@@ -13,9 +13,9 @@ true when behaviour changes.
 |---|---|---|
 | `secrets-client-project` (root) | n/a | parent and aggregator |
 | `secrets-client-bom` | n/a | BOM of the modules below |
-| `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`), guarded memory, and TLS through OpenSSL for the providers (`io.descoped.secrets.api.tls`, a qualified export) |
+| `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`), guarded memory, and for the network providers TLS through OpenSSL (`io.descoped.secrets.api.tls`) and HTTP/1.1, JSON and Base64 on guarded memory (`io.descoped.secrets.api.http`), both qualified exports |
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
-| `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory: its own HTTP/1.1 client, TLS through OpenSSL 3 (`io.descoped.secrets.api.tls`), JSON reader and Base64; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
+| `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory, through the API module's HTTP and TLS; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
 | `secrets-provider-mounted` | `io.descoped.secrets.provider.mounted` | read-only: secrets the platform mounts as files (Cloud Run, Kubernetes, Secrets Store CSI), read into guarded memory on every read; no network, no credential |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
@@ -61,7 +61,8 @@ change to the API or to a provider's documented behaviour needs a new major vers
   command line (`-DaltSnapshotDeploymentRepository`), and the POM has no `distributionManagement` at all: that is
   what makes a release version fail to deploy there. Never add one. No AWS account ID or CodeArtifact endpoint in
   any public file (POM, workflow, deployed POM, CI log).
-- **SonarCloud**: one project, `descoped_secrets-client-project`, for the whole reactor.
+- **SonarCloud**: one project, `descoped_secrets-client-project`, for the whole reactor, with one JaCoCo report over
+  every module (`secrets-coverage`, never published), so the providers' tests count for the API module's code.
 
 ## Testing
 
