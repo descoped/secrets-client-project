@@ -30,6 +30,7 @@
 
     <properties>
         <java.version>25</java.version>
+        <jacoco.version>0.8.16</jacoco.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -190,7 +191,7 @@
                     <plugin>
                         <groupId>org.jacoco</groupId>
                         <artifactId>jacoco-maven-plugin</artifactId>
-                        <version>0.8.16</version>
+                        <version>${jacoco.version}</version>
                         <executions>
                             <execution>
                                 <id>prepare-agent</id>

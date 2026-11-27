@@ -17,7 +17,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   one. Closing the client closes the secrets it returned.
 - safe-configuration reads, parses, holds and writes in guarded memory: no value is on the Java heap unless the caller
   makes a heap copy, proven by a canary heap-dump test.
-- Google Secret Manager on guarded memory, with its own HTTP/1.1 client, JSON reader and Base64, and TLS through the
+- Google Secret Manager on guarded memory, with the library's own HTTP/1.1 client, JSON reader and Base64, and TLS through the
   system's OpenSSL 3 (FFM) instead of the JDK's `SSLEngine`, which copies plaintext through heap arrays: values, the
   access token and the refresh token are never on the Java heap, over TLS too (proven by canary tests over HTTP and
   TLS). TLS 1.3 or 1.2, AES-GCM or ChaCha20-Poly1305 with ECDHE, the certificate verified against the system's roots

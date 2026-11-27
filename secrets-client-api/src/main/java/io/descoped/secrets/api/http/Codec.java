@@ -198,12 +198,12 @@ public final class Codec {
         private long in;
         private long out;
 
-        public Unescaper(MemorySegment src, MemorySegment dst) {
+        Unescaper(MemorySegment src, MemorySegment dst) {
             this.src = src;
             this.dst = dst;
         }
 
-        public long run() throws MalformedException {
+        long run() throws MalformedException {
             long n = src.byteSize();
             while (in < n) {
                 byte b = get(src, in);

@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  */
 public final class Http {
 
-    /** The largest response read: Secret Manager values are at most 64 KiB, about 88 KiB as Base64 in JSON. */
+    /** The largest response read: provider values are at most 64 KiB, about 88 KiB as Base64 in JSON. */
     static final long MAX_RESPONSE = 4L * 1024 * 1024;
 
     private static final long CHUNK = 32L * 1024;
@@ -282,23 +282,23 @@ public final class Http {
         private long bodyLength;
         private long written;
 
-        public void output(MemorySegment segment) {
+        void output(MemorySegment segment) {
             this.out = segment;
         }
 
-        public boolean complete() {
+        boolean complete() {
             return state == State.DONE;
         }
 
-        public int status() {
+        int status() {
             return status;
         }
 
-        public long bodyLength() {
+        long bodyLength() {
             return bodyLength;
         }
 
-        public void feedUnchecked(MemorySegment segment, long length) {
+        void feedUnchecked(MemorySegment segment, long length) {
             try {
                 feed(segment, length);
             } catch (ProtocolException e) {
@@ -307,7 +307,7 @@ public final class Http {
         }
 
         /** Takes the bytes {@code [0, length)} of {@code segment}. */
-        public void feed(MemorySegment segment, long length) throws ProtocolException {
+        void feed(MemorySegment segment, long length) throws ProtocolException {
             long pos = 0;
             while (pos < length && state != State.DONE) {
                 if (state == State.BODY || state == State.DATA) {
