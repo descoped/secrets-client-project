@@ -5,7 +5,9 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
-4.0 keeps secrets off the Java heap; it is built in steps, and this section grows with them.
+4.0 keeps secrets, and the tokens and keys that grant access to them, off the Java heap: in guarded native memory,
+over TLS too, proven by heap-dump tests for every path. A breaking release: see
+[Migrating from 3.x](docs/migrating.md#migrating-from-3x-to-40) and [the security model](docs/security.md).
 
 ### Added
 
@@ -46,7 +48,11 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   metadata (IMDSv2 only), chosen by `secrets.credentials` or a default chain; tokens and keys on the way stay in
   guarded memory. Keys in environment variables are refused unless `secrets.credentials=environment`, since the JVM
   holds its environment on the heap. Proven by canary heap-dump tests over http and TLS, for every credential source,
-  against a fake that checks every signature.
+  against a fake that checks every signature. Verified against real AWS: on ECS Fargate with the task role, and on
+  EC2 with the instance profile (IMDSv2), both arm64. Fargate blocks `memfd_secret`, so there guarded memory uses
+  locked anonymous pages.
+- [The security model](docs/security.md): what is protected and where protection ends, the credentials each provider
+  accepts and refuses, what the platform must provide, the platforms verified, and what the canary tests prove.
 
 ### Changed
 
@@ -64,6 +70,9 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - Google Secret Manager: `secrets.connect-timeout` and `secrets.request-timeout` include the host name lookup and are
   at most one hour.
 - Closing a client inside a callback of a secret it returned throws `IllegalStateException`; a later `close()` wipes.
+- Linux or macOS only, on x86_64 or aarch64: elsewhere, including Windows, a client refuses to start unless
+  `secrets.memory.guard=off`.
+- A token with a control character (such as a line break) is refused before it is sent, so it cannot inject a header.
 
 ### Removed
 

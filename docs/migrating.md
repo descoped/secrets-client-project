@@ -2,8 +2,22 @@
 
 ## Migrating from 3.x to 4.0
 
-4.0 keeps values off the Java heap, so the client hands them over only as a `Secret`, in guarded memory. Start the
-JVM with `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path).
+4.0 keeps values, and the credentials that grant access to them, off the Java heap, so the client hands values over
+only as a `Secret`, in guarded memory. [The security model](security.md) says what that protects and where it ends.
+The Maven coordinates are unchanged.
+
+### The platform
+
+3.x | 4.0
+---|---
+Java 17 | Java 25 or later
+No JVM flags | `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path); without it a client refuses to start
+Any operating system | Linux or macOS, on x86_64 or aarch64; elsewhere, including Windows, a client refuses to start (tests can set `secrets.memory.guard=off`)
+No memory limits | secrets are locked in memory (`mlock`): a container whose locked-memory limit is too small fails with "Cannot lock". Raise the limit (`docker run --ulimit memlock=...`, the `ulimits` of an ECS task definition), or set `secrets.memory.lock=preferred` to accept swap. Cloud Run, ECS on Fargate and Docker on EC2 work with their defaults
+The JDK's TLS | the Google and AWS providers need OpenSSL 3: `libssl3` on Debian and Ubuntu (minimal and distroless images may lack it), `brew install openssl@3` on macOS
+A seccomp profile that allows the JDK | it must also allow the calls guarded memory makes ([the list](security.md#what-the-platform-must-provide)), including `memfd_secret` to hide secrets from the kernel
+
+### The API and the providers
 
 3.x | 4.0
 ---|---
@@ -14,6 +28,7 @@ JVM with `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the 
 provider `dynamic-configuration`, a properties file | removed: safe-configuration reads a local `key=value` file
 provider `dynamic-configuration`, a directory of secret files | `mounted`, one file per secret. dynamic-configuration removed one trailing LF or CRLF; `mounted` keeps the file's bytes exactly, so write the files without a final line break (`printf '%s' "$value"`), or a password gains a `\n` and authentication fails
 provider `dynamic-configuration`, inline `secrets.values.<name>` in tests | a temporary safe-configuration file, or a `@TempDir` directory with `mounted`
+Google Secret Manager with a service-account key file (`secrets.service-account-key-path`, or `GOOGLE_APPLICATION_CREDENTIALS` naming one) | refused: signing with a key would put it on the heap. On Google Cloud use the metadata server (the attached service account, GKE Workload Identity) and pin it with `secrets.credentials=metadata`; for development, `gcloud auth application-default login` ([credentials](providers/google-secret-manager.md#credentials))
 Google Secret Manager trusts a private CA or TLS proxy through `javax.net.ssl.trustStore` | `secrets.tls.ca-file`, a PEM file of the certificates to trust: TLS goes through OpenSSL 3 now (`libssl3` on Linux, `brew install openssl@3` on macOS), and the JDK's trust store does not apply
 A provider implements `readBytes` and `addVersion(String, byte[])` | it implements `read(String, String)` and `addVersion(String, Secret)`; see [Writing a provider](writing-a-provider.md)
 

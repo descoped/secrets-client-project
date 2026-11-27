@@ -82,10 +82,13 @@ try (SecretManagerClient client = SecretManagerClient.create(configuration);
 ```
 
 `read` keeps the value in guarded native memory, which needs native access: start the JVM with
-`--enable-native-access=io.descoped.secrets.api` (`--enable-native-access=ALL-UNNAMED` on the class path). The
-safe-configuration provider needs it to start at all. See [guarded memory](api.md#guarded-memory-secretmemory-and-secret).
+`--enable-native-access=io.descoped.secrets.api` (`--enable-native-access=ALL-UNNAMED` on the class path). Without
+it, no provider starts. See [guarded memory](api.md#guarded-memory-secretmemory-and-secret).
 The Google and AWS providers also need OpenSSL 3, for TLS and AWS's request signing: `libssl.so.3` on Linux (the
-`libssl3` package on Debian and Ubuntu), `brew install openssl@3` on macOS.
+`libssl3` package on Debian and Ubuntu), `brew install openssl@3` on macOS. It runs on Linux and macOS. Secrets are
+locked in memory, so a container needs a locked-memory limit that fits them; Cloud Run, ECS on Fargate and Docker on
+EC2 work with their defaults. [What the platform must provide](security.md#what-the-platform-must-provide) has the
+details.
 
 On the module path, the application module `requires io.descoped.secrets.api` only; provider modules are found
 without being required. On the class path, providers are found through `META-INF/services`.
