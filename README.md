@@ -74,7 +74,7 @@ Without just, the same with Maven: `./mvnw verify`, `./mvnw verify javadoc:javad
   APIs and of the credential endpoints. The live tests (`just live-google`, `just live-aws`) run against real
   accounts only when their variables are set, never in CI.
 - Pull requests run CI (build, tests, Javadoc, smoke test, SonarCloud) and an automated review. Releases are
-  published to Maven Central by hand. SNAPSHOTs of `master`, and of a branch when run by hand
+  published to Maven Central by hand ([releasing](docs/releasing.md)). SNAPSHOTs of `master`, and of a branch when run by hand
   (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/`, never to Maven Central (see [getting started](docs/getting-started.md)).
 
 ## License
