@@ -106,7 +106,7 @@ public final class Main {
                 "secrets.mounted.directory", System.getProperty("java.io.tmpdir")))) {
             fail(mode + ": a client started without native access (" + client.getClass().getSimpleName() + ")");
         } catch (SecretManagerException e) {
-            if (!e.getMessage().startsWith("Guarded memory needs native access")) {
+            if (!String.valueOf(e.getMessage()).startsWith("Guarded memory needs native access")) {
                 fail(mode + ": " + e);
             }
             System.out.println("OK " + mode + " refused");

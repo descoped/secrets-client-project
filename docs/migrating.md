@@ -15,7 +15,7 @@ No JVM flags | `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` o
 Any operating system | Linux or macOS, on x86_64 or aarch64; elsewhere, including Windows, a client refuses to start (tests can set `secrets.memory.guard=off`)
 No memory limits | secrets are locked in memory (`mlock`): a container whose locked-memory limit is too small fails with "Cannot lock". Raise the limit (`docker run --ulimit memlock=...`, the `ulimits` of an ECS task definition), or set `secrets.memory.lock=preferred` to accept swap. Cloud Run, ECS on Fargate and Docker on EC2 work with their defaults
 The JDK's TLS | the Google and AWS providers need OpenSSL 3: `libssl3` on Debian and Ubuntu (minimal and distroless images may lack it), `brew install openssl@3` on macOS
-A seccomp profile that allows the JDK | it must also allow `mlock`, `madvise`, `mprotect` and `getrandom`, and `memfd_secret` to hide secrets from the kernel
+A seccomp profile that allows the JDK | it must also allow the calls guarded memory makes ([the list](security.md#what-the-platform-must-provide)), including `memfd_secret` to hide secrets from the kernel
 
 ### The API and the providers
 

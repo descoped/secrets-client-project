@@ -76,7 +76,9 @@ temporary credentials are fetched again before they expire.
   limit is too low, a client fails with "Cannot lock". Raise the limit (`ulimit -l`, `docker run --ulimit
   memlock=...`, the `ulimits` of an ECS task definition) or, accepting swap as a leak path,
   `secrets.memory.lock=preferred`.
-- **A seccomp profile** that allows `memfd_secret`, `mlock`, `madvise`, `mprotect` and `getrandom`, if the platform
+- **A seccomp profile** that allows, in addition to what the JVM needs, the calls
+  [guarded memory makes](api.md#guarded-memory-secretmemory-and-secret) (`mmap`, `mprotect`, `mlock`, `munlock`,
+  `munmap`, `madvise`, `ftruncate`, `close`, and `syscall` for `memfd_secret` and `getrandom`), if the platform
   filters system calls. If `memfd_secret` is blocked, guarded memory falls back to anonymous pages.
 
 Verified on real platforms:
@@ -98,4 +100,6 @@ proves itself too: a canary kept on the heap is found in each encoding.
 
 What the tests prove: no copy on the Java heap, the part of memory a heap dump, the garbage collector or a heap
 inspector reaches. What they do not prove: anything about native memory outside guarded memory (OpenSSL's buffers,
-the stack), which a heap dump does not contain.
+the stack), which a heap dump does not contain. They run with the build's JDK and its default garbage collector, on
+macOS and on Linux; another JDK or collector is covered by the design (the value never enters the heap), not by a
+test.
