@@ -42,6 +42,21 @@ public final class Utf8 {
     }
 
     /**
+     * Whether {@code bytes} are valid UTF-8, read in place.
+     *
+     * @param bytes the bytes
+     * @return {@code true} if they are valid UTF-8
+     */
+    public static boolean isValid(MemorySegment bytes) {
+        try {
+            scan(bytes, null);
+            return true;
+        } catch (MalformedException _) {
+            return false;
+        }
+    }
+
+    /**
      * Validates {@code bytes}, and decodes them into {@code out} unless it is {@code null}.
      *
      * @return the number of chars

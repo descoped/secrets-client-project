@@ -76,6 +76,23 @@ public final class Main {
             }
             System.out.println("OK " + mode + " google-secret-manager missing credentials reported");
         }
+
+        // The AWS provider must resolve and load, with no dependency but the API. It reads its credentials on the
+        // first request, so a missing file is reported then, before anything is sent.
+        try (SecretManagerClient client = SecretManagerClient.create(Map.of(
+                "secrets.provider", "aws-secrets-manager",
+                "secrets.region", "eu-north-1",
+                "secrets.endpoint", "http://127.0.0.1:1",
+                "secrets.credentials-path", "/nonexistent/credentials"))) {
+            System.out.println("OK " + mode + " aws-secrets-manager client built");
+            client.read("smoke-test");
+            fail("aws-secrets-manager: read without a credentials file");
+        } catch (SecretManagerException e) {
+            if (!e.getMessage().startsWith("Cannot read the AWS credentials file")) {
+                fail("aws-secrets-manager: " + e);
+            }
+            System.out.println("OK " + mode + " aws-secrets-manager missing credentials reported");
+        }
     }
 
     private static void check(String what, String expected, String actual) {

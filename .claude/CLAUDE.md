@@ -17,6 +17,7 @@ true when behaviour changes.
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory, through the API module's HTTP and TLS; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
 | `secrets-provider-mounted` | `io.descoped.secrets.provider.mounted` | read-only: secrets the platform mounts as files (Cloud Run, Kubernetes, Secrets Store CSI), read into guarded memory on every read; no network, no credential |
+| `secrets-provider-aws-secrets-manager` | `io.descoped.secrets.provider.aws` | AWS Secrets Manager JSON API on guarded memory, signed with SigV4 (HMAC/SHA-256 through `io.descoped.secrets.api.crypto`), through the API module's HTTP and TLS; credentials from the shared credentials file; no dependency but the API |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
 (old tags prefixed with the module name, e.g. `secrets-client-api/2.0.3`). 3.0.0 (2026-11-17) is the first release
@@ -107,6 +108,7 @@ just coverage [module]           # JaCoCo per module in <module>/target/site/jac
 just smoke                       # JPMS smoke test: every provider on the module path and the class path; jdeps
 just linux [modules] [tests]     # the tests on Linux in Docker, where memfd_secret is in use
 just live-google                 # the Google live test (needs SECRETS_GOOGLE_TEST_PROJECT)
+just live-aws                    # the AWS live test (needs SECRETS_AWS_TEST_REGION, SECRETS_AWS_TEST_PROFILE)
 just checks|wait|review|sonar <pr>  # a pull request's checks, waiting for them, the Claude review, SonarCloud
 just ci-log <run>                # the failing lines of a CI run
 ```

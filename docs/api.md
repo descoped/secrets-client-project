@@ -29,6 +29,7 @@ Provider name | Module
 `safe-configuration` | [secrets-provider-safe-configuration](providers/safe-configuration.md)
 `google-secret-manager` | [secrets-provider-google-secret-manager](providers/google-secret-manager.md)
 `mounted` | [secrets-provider-mounted](providers/mounted.md)
+`aws-secrets-manager` | [secrets-provider-aws-secrets-manager](providers/aws-secrets-manager.md)
 
 Because the provider is chosen by configuration, the application code stays the same in every environment: a local
 file on a laptop, Google Secret Manager in production. Build the map from whatever configuration the application
@@ -114,8 +115,9 @@ That is why the client hands values over only as a `Secret`, in guarded memory (
 - Use the value inside `withSegment`, or with `withBytes`/`withChars`, whose heap copy is wiped when the callback
   returns. `withChars` decodes strict UTF-8: invalid UTF-8 is an error, never replaced with `?`.
 - A provider that reads files (safe-configuration, mounted) never puts the value on the Java heap on the way, and
-  neither does safe-configuration's `addVersion`. Google Secret Manager keeps it off the heap over the network too:
-  TLS goes through OpenSSL, not the JDK ([details](providers/google-secret-manager.md#memory-and-tls)).
+  neither does safe-configuration's `addVersion`. Google Secret Manager and AWS Secrets Manager keep it off the heap
+  over the network too: TLS goes through OpenSSL, not the JDK ([details](providers/google-secret-manager.md#memory-and-tls)),
+  and so does AWS's request signing ([details](providers/aws-secrets-manager.md#memory-signing-and-tls)).
 - A value that has to end up in a `String` (a library that only accepts strings) can be made one inside the callback:
   `secret.withChars(String::new)`. The `String` is then on the heap for as long as it lives, outside what this
   library can wipe.
