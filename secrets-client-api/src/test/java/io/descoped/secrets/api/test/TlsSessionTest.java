@@ -259,6 +259,60 @@ class TlsSessionTest {
     }
 
     @Test
+    void anInvalidIpAddressIsRefusedWhenTheSessionOpens() {
+        try (TlsContext context = TlsContext.create(trusted)) {
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> context.open("1.2.3.999"));
+            assertTrue(e.getMessage().contains("1.2.3.999"), e.getMessage());
+        }
+    }
+
+    @Test
+    void anIpv6AddressIsVerifiedAsAnAddress() throws IOException {
+        try (TlsContext context = TlsContext.create(trusted); TlsSession client = context.open("::1")) {
+            Pair pair = new Pair(client, server);
+            SSLHandshakeException e = assertThrows(SSLHandshakeException.class, pair::handshake);
+            assertTrue(e.getMessage().toLowerCase(Locale.ROOT).contains("ip address mismatch"), e.getMessage());
+        }
+    }
+
+    @Test
+    void garbageInsteadOfAHandshakeIsRefused() throws IOException {
+        try (TlsContext context = TlsContext.create(trusted); TlsSession client = context.open("127.0.0.1")) {
+            assertEquals(TlsSession.Handshake.WANT_READ, client.handshake());
+            client.feed(direct("HTTP/1.1 400 Bad Request\r\n\r\n".getBytes(StandardCharsets.US_ASCII)));
+            SSLHandshakeException e = assertThrows(SSLHandshakeException.class, client::handshake);
+            assertTrue(e.getMessage().startsWith("The TLS handshake failed"), e.getMessage());
+        }
+    }
+
+    @Test
+    void garbageAfterTheHandshakeFailsTheRead() throws IOException {
+        try (TlsContext context = TlsContext.create(trusted); TlsSession client = context.open("127.0.0.1")) {
+            Pair pair = new Pair(client, server);
+            pair.handshake();
+            byte[] record = {23, 3, 3, 0, 32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
+            client.feed(direct(record));
+            ByteBuffer out = ByteBuffer.allocateDirect(100);
+            javax.net.ssl.SSLException e = assertThrows(javax.net.ssl.SSLException.class, () -> client.read(out));
+            assertTrue(e.getMessage().startsWith("TLS read failed"), e.getMessage());
+        }
+    }
+
+    @Test
+    void emptyBuffersAndAnEarlyWrite() throws IOException {
+        try (TlsContext context = TlsContext.create(trusted); TlsSession client = context.open("127.0.0.1")) {
+            assertEquals(0, client.read(ByteBuffer.allocateDirect(0)), "no room, nothing read");
+            client.handshake();
+            assertTrue(client.hasOutput(), "the client hello");
+            assertEquals(0, client.drain(ByteBuffer.allocateDirect(0)), "no room, nothing drained");
+            ByteBuffer early = direct("too early".getBytes(StandardCharsets.US_ASCII));
+            assertThrows(javax.net.ssl.SSLException.class, () -> client.write(early),
+                    "no write before the handshake is done");
+        }
+    }
+
+    @Test
     void theSystemsTrustedCertificatesLoad() {
         try (TlsContext context = TlsContext.create(null); TlsSession session = context.open("example.com")) {
             assertFalse(session.hasBuffered());

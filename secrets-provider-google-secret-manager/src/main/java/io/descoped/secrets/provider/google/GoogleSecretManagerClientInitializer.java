@@ -154,15 +154,7 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
                 configuration.getOrDefault(TOKEN_ENDPOINT_KEY, DEFAULT_TOKEN_ENDPOINT));
         URI metadataEndpoint = metadata(configuration.getOrDefault(METADATA_ENDPOINT_KEY,
                 DEFAULT_METADATA_ENDPOINT));
-        List<String> locations = Arrays.stream(configuration.getOrDefault(REPLICATION_KEY, "").split(","))
-                .map(String::strip)
-                .filter(s -> !s.isEmpty())
-                .toList();
-        for (String location : locations) {
-            if (!LOCATION.matcher(location).matches()) {
-                throw new IllegalArgumentException("Invalid location in '" + REPLICATION_KEY + "': " + location);
-            }
-        }
+        List<String> locations = locations(configuration);
         String mode = configuration.getOrDefault(CREDENTIALS_KEY, APPLICATION_DEFAULT);
         if (!mode.equals(APPLICATION_DEFAULT) && !mode.equals(METADATA)) {
             throw new IllegalArgumentException("Invalid '" + CREDENTIALS_KEY + "': " + mode
@@ -182,21 +174,42 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         TlsContext tls = secure ? tlsContext(configuration.get(CA_FILE_KEY)) : null;
         try {
             SecretMemory memory = SecretMemory.create(configuration);
-            try {
-                AccessTokens.Source source = file == null
-                        ? new AccessTokens.MetadataServer(Http.Target.of(metadataEndpoint, tls), timeouts, memory)
-                        : AccessTokens.AuthorizedUser.load(file, Http.Target.of(tokenEndpoint, tls), timeouts,
-                        memory);
-                return new GoogleSecretManagerClient(Http.Target.of(endpoint, tls), projectId, locations, timeouts,
-                        memory, new AccessTokens(source), tls);
-            } catch (RuntimeException e) {
-                memory.close();
-                throw e;
-            }
+            Http.Target tokens = file == null ? Http.Target.of(metadataEndpoint, tls)
+                    : Http.Target.of(tokenEndpoint, tls);
+            return client(memory, file, tokens, Http.Target.of(endpoint, tls), projectId, locations, timeouts, tls);
         } catch (RuntimeException e) {
             closeQuietly(tls);
             throw e;
         }
+    }
+
+    /** The client on {@code memory}, which is closed if the client cannot be created. */
+    private static GoogleSecretManagerClient client(SecretMemory memory, Path file, Http.Target tokens,
+                                                    Http.Target api, String projectId, List<String> locations,
+                                                    Http.Timeouts timeouts, TlsContext tls) {
+        try {
+            AccessTokens.Source source = file == null
+                    ? new AccessTokens.MetadataServer(tokens, timeouts, memory)
+                    : AccessTokens.AuthorizedUser.load(file, tokens, timeouts, memory);
+            return new GoogleSecretManagerClient(api, projectId, locations, timeouts, memory,
+                    new AccessTokens(source), tls);
+        } catch (RuntimeException e) {
+            memory.close();
+            throw e;
+        }
+    }
+
+    private static List<String> locations(Map<String, String> configuration) {
+        List<String> locations = Arrays.stream(configuration.getOrDefault(REPLICATION_KEY, "").split(","))
+                .map(String::strip)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        for (String location : locations) {
+            if (!LOCATION.matcher(location).matches()) {
+                throw new IllegalArgumentException("Invalid location in '" + REPLICATION_KEY + "': " + location);
+            }
+        }
+        return locations;
     }
 
     private static TlsContext tlsContext(String caFile) {
