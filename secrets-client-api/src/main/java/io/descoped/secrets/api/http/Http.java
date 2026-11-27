@@ -36,7 +36,7 @@ public final class Http {
     private static final long CHUNK = 32L * 1024;
     private static final int MAX_HEAD = 64 * 1024;
     private static final byte[] CRLF = {'\r', '\n'};
-    private static final byte[] AUTHORIZATION = "Authorization: Bearer ".getBytes(StandardCharsets.US_ASCII);
+    private static final String BEARER = "Bearer ";
     private static final Pattern STATUS_LINE = Pattern.compile("HTTP/1\\.[01] ([1-5]\\d\\d)( .*)?");
 
     private Http() {
@@ -124,6 +124,35 @@ public final class Http {
      */
     public static Secret request(SecretMemory memory, Target target, String method, String path, List<String> headers,
                           MemorySegment bearer, MemorySegment body) {
+        List<SecretHeader> secret = bearer == null ? List.of() : List.of(new SecretHeader("Authorization", BEARER,
+                bearer));
+        return request(memory, target, method, path, headers, secret, body);
+    }
+
+    /**
+     * A header whose value is secret: {@code name: prefix value}, written into the request from guarded memory.
+     *
+     * @param name   the header's name, not secret
+     * @param prefix text before the value, not secret ({@code ""} for none)
+     * @param value  the secret part of the value
+     */
+    public record SecretHeader(String name, String prefix, MemorySegment value) {
+    }
+
+    /**
+     * Builds a request in guarded memory, with headers whose values are secret.
+     *
+     * @param memory        where to build it
+     * @param target        the server
+     * @param method        the HTTP method
+     * @param path          the path and query, from the target's base path on; not secret
+     * @param headers       further header lines, without line endings; not secret
+     * @param secretHeaders headers whose values are secret, written after the others
+     * @param body          the body, or {@code null} for none
+     * @return the request, for {@link #exchange}; the caller closes it
+     */
+    public static Secret request(SecretMemory memory, Target target, String method, String path, List<String> headers,
+                                 List<SecretHeader> secretHeaders, MemorySegment body) {
         StringBuilder head = new StringBuilder()
                 .append(method).append(' ').append(target.path()).append(path).append(" HTTP/1.1\r\n")
                 .append("Host: ").append(target.hostHeader()).append("\r\n")
@@ -137,13 +166,18 @@ public final class Http {
             head.append("Content-Length: ").append(body.byteSize()).append("\r\n");
         }
         byte[] start = head.toString().getBytes(StandardCharsets.US_ASCII);
-        long length = start.length + (bearer == null ? 0 : AUTHORIZATION.length + bearer.byteSize() + CRLF.length)
-                + CRLF.length + (body == null ? 0 : body.byteSize());
+        List<byte[]> names = secretHeaders.stream()
+                .map(h -> (h.name() + ": " + h.prefix()).getBytes(StandardCharsets.US_ASCII))
+                .toList();
+        long length = start.length + CRLF.length + (body == null ? 0 : body.byteSize());
+        for (int i = 0; i < names.size(); i++) {
+            length += names.get(i).length + secretHeaders.get(i).value().byteSize() + CRLF.length;
+        }
         return memory.allocate(length, out -> {
             long pos = Codec.putBytes(out, 0, start);
-            if (bearer != null) {
-                pos = Codec.putBytes(out, pos, AUTHORIZATION);
-                pos = Codec.putSegment(out, pos, bearer);
+            for (int i = 0; i < names.size(); i++) {
+                pos = Codec.putBytes(out, pos, names.get(i));
+                pos = Codec.putSegment(out, pos, secretHeaders.get(i).value());
                 pos = Codec.putBytes(out, pos, CRLF);
             }
             pos = Codec.putBytes(out, pos, CRLF);

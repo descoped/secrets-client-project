@@ -172,8 +172,8 @@ final class AccessTokens implements AutoCloseable {
         @Override
         public Token fetch() {
             String from = "the metadata server " + target.hostHeader();
-            Secret request = Http.request(memory, target, "GET", PATH, List.of("Metadata-Flavor: Google"), null,
-                    null);
+            Secret request = Http.request(memory, target, "GET", PATH, List.of("Metadata-Flavor: Google"),
+                    List.of(), null);
             try (request; Http.Response response = Http.exchange(target, request, timeouts, memory)) {
                 if (response.status() != 200) {
                     throw new SecretManagerException("Cannot get an access token from " + from + ": HTTP "
@@ -213,7 +213,7 @@ final class AccessTokens implements AutoCloseable {
                     Codec.formEncode(refresh, out, pos);
                 })) {
                     return form.withSegment(body -> Http.request(memory, target, "POST", "",
-                            List.of("Content-Type: application/x-www-form-urlencoded"), null, body));
+                            List.of("Content-Type: application/x-www-form-urlencoded"), List.of(), body));
                 }
             }));
             try (request; Http.Response response = Http.exchange(target, request, timeouts, memory)) {

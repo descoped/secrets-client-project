@@ -36,6 +36,14 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   into guarded memory with a `FileChannel`, never cached, so rotated values are seen; no network code and no
   credential in the process. Names are paths under `secrets.mounted.directory`; links may not lead outside it.
   Proven by a canary heap-dump test, and verified on Cloud Run with a Secret Manager secret volume.
+- Provider `aws-secrets-manager` (`secrets-provider-aws-secrets-manager`): AWS Secrets Manager through its JSON API,
+  signed with SigV4, with no AWS SDK and no dependency but the API. The secret access key, the session token and the
+  values stay in guarded memory: requests are built and signed there, with SHA-256 and HMAC-SHA256 through OpenSSL's
+  libcrypto (the JDK's `Mac` copies its key to the heap), and TLS through OpenSSL. Reads by the current version,
+  version ID or staging label; `addVersion` creates the secret if needed (`secrets.kms-key-id`,
+  `secrets.replica-regions`). Credentials from the shared credentials file (`secrets.credentials-path`,
+  `secrets.aws-profile`). Proven by canary heap-dump tests over http and TLS, against a fake that checks every
+  signature.
 
 ### Changed
 

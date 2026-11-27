@@ -90,6 +90,12 @@ live-google: _jdk
     ./mvnw -B verify -pl secrets-provider-google-secret-manager -am -Djacoco.skip=true \
         -Dsurefire.failIfNoSpecifiedTests=false -Dtest=GoogleSecretManagerLiveTest
 
+# The AWS live test against a real account (SECRETS_AWS_TEST_REGION; SECRETS_AWS_TEST_PROFILE names the profile)
+live-aws: _jdk
+    : "${SECRETS_AWS_TEST_REGION:?set SECRETS_AWS_TEST_REGION}"
+    ./mvnw -B verify -pl secrets-provider-aws-secrets-manager -am -Djacoco.skip=true \
+        -Dsurefire.failIfNoSpecifiedTests=false -Dtest=AwsSecretsManagerLiveTest
+
 # ---------------------------------------------------------------- Pull requests (read only)
 
 # A pull request's checks

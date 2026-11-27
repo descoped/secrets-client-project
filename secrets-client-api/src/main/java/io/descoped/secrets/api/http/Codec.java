@@ -1,5 +1,7 @@
 package io.descoped.secrets.api.http;
 
+import io.descoped.secrets.api.internal.Utf8;
+
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.util.zip.CRC32C;
@@ -317,6 +319,89 @@ public final class Codec {
             }
             return out + length;
         }
+    }
+
+    // JSON strings, written
+
+    /**
+     * Whether {@code src} is valid UTF-8, read in place.
+     *
+     * @param src the bytes
+     * @return {@code true} if they are valid UTF-8
+     */
+    public static boolean isUtf8(MemorySegment src) {
+        return Utf8.isValid(src);
+    }
+
+    /** The short escape of {@code b} in a JSON string ({@code n} for a line feed), or 0 if it has none. */
+    private static int shortEscape(int b) {
+        return switch (b) {
+            case '"' -> '"';
+            case '\\' -> '\\';
+            case '\b' -> 'b';
+            case '\f' -> 'f';
+            case '\n' -> 'n';
+            case '\r' -> 'r';
+            case '\t' -> 't';
+            default -> 0;
+        };
+    }
+
+    private static boolean needsUnicodeEscape(int b) {
+        return b < 0x20 || b == 0x7F;
+    }
+
+    /**
+     * The length of {@code src}, valid UTF-8, as the content of a JSON string ({@link #jsonEscape}).
+     *
+     * @param src the bytes, valid UTF-8
+     * @return the number of bytes once escaped
+     */
+    public static long jsonEscapedLength(MemorySegment src) {
+        long length = 0;
+        for (long i = 0; i < src.byteSize(); i++) {
+            int b = get(src, i) & 0xFF;
+            if (shortEscape(b) != 0) {
+                length += 2;
+            } else if (needsUnicodeEscape(b)) {
+                length += 6;
+            } else {
+                length++;
+            }
+        }
+        return length;
+    }
+
+    /**
+     * Writes {@code src}, valid UTF-8, as the content of a JSON string (without the quotes) into {@code dst} at
+     * {@code offset}: quote and backslash escaped, control characters as short escapes or <code>&#92;u00XX</code>,
+     * other bytes as they are.
+     *
+     * @param src    the bytes, valid UTF-8
+     * @param dst    where to write, with room for {@link #jsonEscapedLength(MemorySegment)} bytes
+     * @param offset where in {@code dst} to start
+     * @return the offset after what was written
+     */
+    public static long jsonEscape(MemorySegment src, MemorySegment dst, long offset) {
+        long out = offset;
+        for (long i = 0; i < src.byteSize(); i++) {
+            int b = get(src, i) & 0xFF;
+            int escape = shortEscape(b);
+            if (escape != 0) {
+                put(dst, out++, '\\');
+                put(dst, out++, escape);
+            } else if (needsUnicodeEscape(b)) {
+                put(dst, out++, '\\');
+                put(dst, out++, 'u');
+                put(dst, out++, '0');
+                put(dst, out++, '0');
+                put(dst, out++, HEX[b >> 4]);
+                put(dst, out++, HEX[b & 0xF]);
+            } else {
+                put(dst, out++, b);
+            }
+        }
+        return out;
     }
 
     // application/x-www-form-urlencoded

@@ -22,6 +22,7 @@
         <module>secrets-provider-safe-configuration</module>
         <module>secrets-provider-google-secret-manager</module>
         <module>secrets-provider-mounted</module>
+        <module>secrets-provider-aws-secrets-manager</module>
         <!-- Test support for the modules above; never published. -->
         <module>secrets-test-support</module>
         <!-- One coverage report over every module, for SonarCloud; never published. -->
