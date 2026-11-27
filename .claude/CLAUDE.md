@@ -120,7 +120,8 @@ just ci-log <run>                # the failing lines of a CI run
   them without asking. A task that comes back often and has no recipe gets one, rather than an ad-hoc command line
   (an environment prefix, `docker`, `curl`, an inline script), which makes the owner approve it.
 - Edit files with the editor tools, not with `python3`, `sed` or heredocs.
-- `git` and `gh` never ask: pushing branches, creating, commenting on and merging pull requests (after the gate: CI,
-  SonarCloud, the review triaged) are authorized; say in the same message what is applied and why. `settings.json`
-  allows every `git` and `gh` command (for manual mode) and has no `ask` rules on purpose: an `ask` rule overrides
-  the owner's auto mode. Only force pushes are refused. Releases still wait for the owner's word (see the invariants).
+- Nothing asks but deleting: the owner's own settings allow every command and make only removals (`rm`,
+  `git clean`, `git reset --hard`, force pushes) ask. This repository has no `.claude/settings.json` on purpose: its
+  rules would override the owner's, and they would also apply to the Claude bot in CI. Pushing branches, creating, commenting on and merging pull requests (after the gate:
+  CI, SonarCloud, the review triaged) are authorized; say in the same message what is applied and why. Releases still
+  wait for the owner's word (see the invariants).
