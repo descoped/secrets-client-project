@@ -22,6 +22,7 @@
         <module>secrets-provider-safe-configuration</module>
         <module>secrets-provider-dynamic-configuration</module>
         <module>secrets-provider-google-secret-manager</module>
+        <module>secrets-provider-mounted</module>
         <!-- Test support for the modules above; never published. -->
         <module>secrets-test-support</module>
     </modules>

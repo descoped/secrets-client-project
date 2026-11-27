@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.descoped.secrets</groupId>
+        <artifactId>secrets-client-project</artifactId>
+        <version>4.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>secrets-provider-mounted</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Secrets Provider Mounted</name>
+    <description>Read-only SecretManagerClient provider for secrets mounted as files (Cloud Run secret volumes, Kubernetes secret volumes, the Secrets Store CSI driver), read into guarded memory.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.descoped.secrets</groupId>
+            <artifactId>secrets-client-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.descoped.secrets</groupId>
+            <artifactId>secrets-test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

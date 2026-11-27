@@ -62,6 +62,7 @@ Artifact | JPMS module | Documentation
 `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | [safe-configuration](providers/safe-configuration.md)
 `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | [dynamic-configuration](providers/dynamic-configuration.md)
 `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | [google-secret-manager](providers/google-secret-manager.md)
+`secrets-provider-mounted` | `io.descoped.secrets.provider.mounted` | [mounted](providers/mounted.md)
 `secrets-client-bom` | | the BOM above
 
 ## A first client
@@ -94,6 +95,7 @@ Provider | Reads | Writes | Holds values as | Use it for
 `safe-configuration` | a local `key=value` file | yes, atomically, owner-only | guarded memory | local development and tests
 `dynamic-configuration` | a properties file, a secret directory, inline values | no | strings | tests, migration from property files
 `google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | guarded memory | production on Google Cloud
+`mounted` | files the platform mounts (Cloud Run, Kubernetes, Secrets Store CSI) | no | guarded memory, read on every `read` | production where the platform mounts secrets: no credential in the process
 
 Every provider follows the same contract, so switching is a configuration change; see
 [The API](api.md#the-contract).

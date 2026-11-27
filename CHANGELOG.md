@@ -25,6 +25,11 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   for the metadata server only. New keys `secrets.credentials`, `secrets.credentials-path`, `secrets.token-endpoint`,
   `secrets.metadata-endpoint`. Verified against real Google Cloud: with `authorized_user` credentials, and on Cloud
   Run (second-generation) with the metadata server and locked guarded memory.
+- Provider `mounted` (`secrets-provider-mounted`): read-only, for secrets the platform mounts as files (Cloud Run
+  secret volumes, Kubernetes secret volumes, the Secrets Store CSI driver on GKE and EKS). Each `read` reads the file
+  into guarded memory with a `FileChannel`, never cached, so rotated values are seen; no network code and no
+  credential in the process. Names are paths under `secrets.mounted.directory`; links may not lead outside it.
+  Proven by a canary heap-dump test.
 
 ### Changed
 
