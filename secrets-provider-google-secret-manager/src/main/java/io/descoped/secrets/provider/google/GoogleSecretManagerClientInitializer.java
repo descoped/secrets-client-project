@@ -62,7 +62,8 @@ import java.util.regex.Pattern;
  * <p>The access token is fetched on first use and replaced when it has less than three minutes left. TLS goes
  * through the system's OpenSSL 3 ({@code libssl}; Homebrew's {@code openssl@3} on macOS), not the JDK, so that
  * nothing sent or received is on the Java heap: TLS 1.3 or 1.2 with AES-GCM or ChaCha20-Poly1305, the certificate
- * verified against the trusted roots and the host, SNI. Without OpenSSL 3 the client cannot be created. The timeouts
+ * verified against the trusted roots and the host, SNI. Without OpenSSL 3, a client with an https endpoint cannot
+ * be created. The timeouts
  * include looking the host name up; they are at most one hour.
  *
  * <p>Versions are Secret Manager's: {@code latest} or a version number; {@code addVersion} returns the new number.
@@ -175,13 +176,17 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         Http.Timeouts timeouts = new Http.Timeouts(
                 duration(configuration, CONNECT_TIMEOUT_KEY, Duration.ofSeconds(10)),
                 duration(configuration, REQUEST_TIMEOUT_KEY, Duration.ofSeconds(30)));
+        // OpenSSL only when something is reached over https: the metadata server and test servers are plain http.
+        boolean secure = isHttps(endpoint) || !mode.equals(METADATA) && isHttps(tokenEndpoint);
         String caFile = configuration.get(CA_FILE_KEY);
-        TlsContext tls = TlsContext.create(caFile == null ? null : Path.of(caFile));
+        TlsContext tls = secure ? TlsContext.create(caFile == null ? null : Path.of(caFile)) : null;
         SecretMemory memory;
         try {
             memory = SecretMemory.create(configuration);
         } catch (RuntimeException e) {
-            tls.close();
+            if (tls != null) {
+                tls.close();
+            }
             throw e;
         }
         try {
@@ -193,9 +198,15 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
                     memory, new AccessTokens(source), tls);
         } catch (RuntimeException e) {
             memory.close();
-            tls.close();
+            if (tls != null) {
+                tls.close();
+            }
             throw e;
         }
+    }
+
+    private static boolean isHttps(URI uri) {
+        return "https".equalsIgnoreCase(uri.getScheme());
     }
 
     /**

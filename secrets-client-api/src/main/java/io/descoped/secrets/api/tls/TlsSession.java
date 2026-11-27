@@ -30,7 +30,7 @@ public final class TlsSession implements AutoCloseable {
     }
 
     private final OpenSsl ssl;
-    private final Arena arena = Arena.ofShared();
+    private final Arena arena = Arena.ofConfined();
     private final MemorySegment session;
     private final MemorySegment rbio;
     private final MemorySegment wbio;
@@ -51,6 +51,8 @@ public final class TlsSession implements AutoCloseable {
             rbio = call(() -> (MemorySegment) ssl.bioNew.invokeExact(memoryBio));
             wbio = call(() -> (MemorySegment) ssl.bioNew.invokeExact(memoryBio));
             if (rbio.equals(MemorySegment.NULL) || wbio.equals(MemorySegment.NULL)) {
+                free(rbio);
+                free(wbio);
                 throw new SecretManagerException("Cannot create TLS buffers: " + ssl.errors());
             }
             // The session owns the buffers from here, and frees them with itself.
@@ -77,6 +79,13 @@ public final class TlsSession implements AutoCloseable {
         } catch (RuntimeException e) {
             close();
             throw e;
+        }
+    }
+
+    /** Frees a buffer the session does not own yet. */
+    private void free(MemorySegment bio) {
+        if (!bio.equals(MemorySegment.NULL)) {
+            call(() -> (int) ssl.bioFree.invokeExact(bio));
         }
     }
 
@@ -241,13 +250,15 @@ public final class TlsSession implements AutoCloseable {
     }
 
     /**
-     * The number of decrypted bytes buffered in the session, which {@link #read} gives without more data.
+     * Whether {@link #read} may give something without more data from the server: decrypted bytes that did not fit
+     * the last buffer, or records fed and not yet decrypted.
      *
-     * @return the number of bytes
+     * @return {@code true} if there is something to read before waiting for the server
      */
-    public int pending() {
+    public boolean hasBuffered() {
         checkOpen();
-        return call(() -> (int) ssl.sslPending.invokeExact(session));
+        return call(() -> (int) ssl.sslPending.invokeExact(session)) > 0
+                || call(() -> (long) ssl.bioCtrlPending.invokeExact(rbio)) > 0;
     }
 
     /** Queues a close_notify for the server, which {@link #drain} gives; failures are of no consequence. */

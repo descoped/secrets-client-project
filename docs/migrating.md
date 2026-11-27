@@ -14,6 +14,7 @@ JVM with `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the 
 provider `dynamic-configuration`, a properties file | removed: safe-configuration reads a local `key=value` file
 provider `dynamic-configuration`, a directory of secret files | `mounted`, one file per secret. dynamic-configuration removed one trailing LF or CRLF; `mounted` keeps the file's bytes exactly, so write the files without a final line break (`printf '%s' "$value"`), or a password gains a `\n` and authentication fails
 provider `dynamic-configuration`, inline `secrets.values.<name>` in tests | a temporary safe-configuration file, or a `@TempDir` directory with `mounted`
+Google Secret Manager trusts a private CA or TLS proxy through `javax.net.ssl.trustStore` | `secrets.tls.ca-file`, a PEM file of the certificates to trust: TLS goes through OpenSSL 3 now (`libssl3` on Linux, `brew install openssl@3` on macOS), and the JDK's trust store does not apply
 A provider implements `readBytes` and `addVersion(String, byte[])` | it implements `read(String, String)` and `addVersion(String, Secret)`; see [Writing a provider](writing-a-provider.md)
 
 ## Migrating from 2.x

@@ -12,7 +12,7 @@ module io.descoped.secrets.api {
 
     exports io.descoped.secrets.api;
     // TLS through OpenSSL, for the providers that talk to a server; not part of the API.
-    exports io.descoped.secrets.api.tls to io.descoped.secrets.provider.google;
+    exports io.descoped.secrets.api.tls to io.descoped.secrets.provider.google, io.descoped.secrets.api.test;
 
     uses io.descoped.secrets.api.SecretManagerClientInitializer;
 }

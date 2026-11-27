@@ -83,7 +83,8 @@ try (SecretManagerClient client = SecretManagerClient.create(configuration);
 `read` keeps the value in guarded native memory, which needs native access: start the JVM with
 `--enable-native-access=io.descoped.secrets.api` (`--enable-native-access=ALL-UNNAMED` on the class path). The
 safe-configuration provider needs it to start at all. See [guarded memory](api.md#guarded-memory-secretmemory-and-secret).
-The Google provider also needs OpenSSL 3 for TLS: Linux images have it; on macOS, `brew install openssl@3`.
+The Google provider also needs OpenSSL 3 for TLS: `libssl.so.3` on Linux (the `libssl3` package on Debian and
+Ubuntu), `brew install openssl@3` on macOS.
 
 On the module path, the application module `requires io.descoped.secrets.api` only; provider modules are found
 without being required. On the class path, providers are found through `META-INF/services`.

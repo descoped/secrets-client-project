@@ -305,7 +305,7 @@ abstract sealed class Connection implements AutoCloseable {
 
         @Override
         void awaitData(long deadline) throws IOException {
-            if (session.pending() > 0) {
+            if (session.hasBuffered()) {
                 return;
             }
             while (!hasRecord() && !ended()) {
@@ -330,18 +330,15 @@ abstract sealed class Connection implements AutoCloseable {
                 feedRecords();
             }
             int total = 0;
-            while (dst.hasRemaining()) {
-                int n = session.read(dst);
-                if (n < 0) {
-                    closed = true;
-                    break;
+            int n = 1;
+            while (n > 0 && dst.hasRemaining()) {
+                n = session.read(dst);
+                if (n > 0) {
+                    total += n;
                 }
-                if (n == 0) {
-                    break;
-                }
-                total += n;
             }
-            if (total == 0 && (closed || ended() && !hasRecord() && session.pending() == 0)) {
+            closed = n < 0;
+            if (total == 0 && (closed || ended() && !hasRecord() && !session.hasBuffered())) {
                 return -1;
             }
             return total;

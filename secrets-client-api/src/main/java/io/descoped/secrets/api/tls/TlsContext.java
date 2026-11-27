@@ -16,7 +16,8 @@ import static io.descoped.secrets.api.tls.OpenSsl.call;
  * received is never on the Java heap: the JDK's {@code SSLEngine} copies plaintext through heap arrays.
  *
  * <ul>
- *     <li>TLS 1.3 or 1.2, with AES-GCM or ChaCha20-Poly1305 and ECDHE only; no renegotiation, no compression.</li>
+ *     <li>TLS 1.3 or 1.2, with AES-GCM or ChaCha20-Poly1305 and ECDHE only; no renegotiation, no compression.
+ *     OpenSSL clears decrypted data from its buffers once it is handed over ({@code SSL_OP_CLEANSE_PLAINTEXT}).</li>
  *     <li>The server's certificate must chain to a trusted root: the system's (OpenSSL's default locations) or, if a
  *     CA file is given, only the certificates in that PEM file. Its name must match the host, or its IP address the
  *     IP literal; SNI is sent for host names.</li>
@@ -61,7 +62,8 @@ public final class TlsContext implements AutoCloseable {
                     "the minimum TLS version");
             context.check(ctrl(ssl, ctx, OpenSsl.SSL_CTRL_SET_MAX_PROTO_VERSION, OpenSsl.TLS1_3_VERSION) == 1,
                     "the maximum TLS version");
-            long options = OpenSsl.SSL_OP_NO_COMPRESSION | OpenSsl.SSL_OP_NO_RENEGOTIATION;
+            long options = OpenSsl.SSL_OP_CLEANSE_PLAINTEXT | OpenSsl.SSL_OP_NO_COMPRESSION
+                    | OpenSsl.SSL_OP_NO_RENEGOTIATION;
             call(() -> (long) ssl.ctxSetOptions.invokeExact(ctx, options));
             MemorySegment suites = arena.allocateFrom(TLS13_SUITES);
             context.check(call(() -> (int) ssl.ctxSetCiphersuites.invokeExact(ctx, suites)) == 1,
@@ -114,10 +116,15 @@ public final class TlsContext implements AutoCloseable {
             if (closed) {
                 throw new IllegalStateException("TLS context is closed");
             }
-            return new TlsSession(ssl, ctx, host);
+            return newSession(host);
         } finally {
             lock.readLock().unlock();
         }
+    }
+
+    /** A session the caller owns and closes. */
+    private TlsSession newSession(String host) {
+        return new TlsSession(ssl, ctx, host);
     }
 
     /** Frees the context; sessions already open keep their own reference to it. Idempotent. */

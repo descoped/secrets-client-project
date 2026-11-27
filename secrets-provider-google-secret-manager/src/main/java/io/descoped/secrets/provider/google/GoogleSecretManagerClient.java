@@ -132,11 +132,16 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
     @Override
     public void close() {
         closed = true;
-        tokens.close();
         try {
-            memory.close();
+            tokens.close();
         } finally {
-            tls.close();
+            try {
+                memory.close();
+            } finally {
+                if (tls != null) {
+                    tls.close();
+                }
+            }
         }
     }
 

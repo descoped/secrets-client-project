@@ -106,10 +106,11 @@ the values are never on the Java heap, over TLS too. The canary tests prove it o
 - The server's certificate must chain to a trusted root and match the host name (or the IP address); SNI is sent
   for host names. The trusted roots are the system's (OpenSSL's default locations), or, with `secrets.tls.ca-file`,
   only the certificates in that PEM file. `javax.net.ssl.trustStore` does not apply.
-- OpenSSL 3 must be installed: Linux images have `libssl.so.3` (Debian and Ubuntu `libssl3`); on macOS,
-  `brew install openssl@3`. Without it, the client cannot be created, and the error says so.
-- While a record is decrypted, its plaintext is in OpenSSL's own buffers: native memory, not the Java heap, released
-  when the connection is idle (`SSL_MODE_RELEASE_BUFFERS`).
+- OpenSSL 3 must be installed: `libssl.so.3` on Linux (Debian and Ubuntu: the `libssl3` package, which minimal and
+  distroless images may lack); on macOS, `brew install openssl@3`. Without it, a client with an https endpoint
+  cannot be created, and the error says so.
+- While a record is decrypted, its plaintext is in OpenSSL's own buffers: native memory, not the Java heap. OpenSSL
+  clears it once it is handed over and when the connection is freed (`SSL_OP_CLEANSE_PLAINTEXT`).
 
 ## Testing
 

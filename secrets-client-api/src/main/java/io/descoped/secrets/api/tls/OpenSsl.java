@@ -39,6 +39,8 @@ final class OpenSsl {
     static final int SSL_CTRL_SET_MIN_PROTO_VERSION = 123;
     static final int SSL_CTRL_SET_MAX_PROTO_VERSION = 124;
     static final long SSL_MODE_RELEASE_BUFFERS = 0x10;
+    /** Clear decrypted data once it is handed over, and on {@code SSL_free} (OpenSSL 3.0). */
+    static final long SSL_OP_CLEANSE_PLAINTEXT = 1L << 1;
     static final long SSL_OP_NO_COMPRESSION = 1L << 17;
     static final long SSL_OP_NO_RENEGOTIATION = 1L << 30;
     static final long TLS1_2_VERSION = 0x0303;
@@ -65,6 +67,7 @@ final class OpenSsl {
     final MethodHandle paramSet1IpAsc;
     final MethodHandle bioSMem;
     final MethodHandle bioNew;
+    final MethodHandle bioFree;
     final MethodHandle sslSetBio;
     final MethodHandle bioWrite;
     final MethodHandle bioRead;
@@ -135,6 +138,7 @@ final class OpenSsl {
         paramSet1IpAsc = b.bind("X509_VERIFY_PARAM_set1_ip_asc", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
         bioSMem = b.bind("BIO_s_mem", FunctionDescriptor.of(ADDRESS));
         bioNew = b.bind("BIO_new", FunctionDescriptor.of(ADDRESS, ADDRESS));
+        bioFree = b.bind("BIO_free", FunctionDescriptor.of(JAVA_INT, ADDRESS));
         sslSetBio = b.bind("SSL_set_bio", FunctionDescriptor.ofVoid(ADDRESS, ADDRESS, ADDRESS));
         bioWrite = b.bind("BIO_write", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
         bioRead = b.bind("BIO_read", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
@@ -170,12 +174,16 @@ final class OpenSsl {
             }
             throw missing(tried, "install it with 'brew install openssl@3'");
         }
+        if (!os.startsWith("linux")) {
+            throw new SecretManagerException("TLS through OpenSSL is supported on Linux and macOS, not on "
+                    + System.getProperty("os.name"));
+        }
         tried.add("libssl.so.3");
         try {
             return SymbolLookup.libraryLookup("libssl.so.3", global)
                     .or(SymbolLookup.libraryLookup("libcrypto.so.3", global));
-        } catch (IllegalArgumentException e) {
-            throw missing(tried, "install the libssl3 package");
+        } catch (IllegalArgumentException _) {
+            throw missing(tried, "install OpenSSL 3 (on Debian and Ubuntu, the libssl3 package)");
         }
     }
 
@@ -213,8 +221,9 @@ final class OpenSsl {
         });
     }
 
-    /** A native call that cannot throw a checked exception. */
+    /** A native call: {@code MethodHandle.invokeExact} is declared to throw {@code Throwable}. */
     @FunctionalInterface
+    @SuppressWarnings("java:S112")
     interface Call<T> {
         T run() throws Throwable;
     }
