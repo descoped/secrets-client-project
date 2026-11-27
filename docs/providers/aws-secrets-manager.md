@@ -19,8 +19,12 @@ Key | Description
 ---|---
 `secrets.provider` | `aws-secrets-manager` (required)
 `secrets.region` | the region, such as `eu-north-1`; else `AWS_REGION`, else `AWS_DEFAULT_REGION` (required)
-`secrets.credentials-path` | the shared credentials file; else the file `AWS_SHARED_CREDENTIALS_FILE` names, else `~/.aws/credentials`
+`secrets.credentials` | where credentials come from: `default` (the default), the chain below; or only `profile`, `container`, `instance` or `environment`
+`secrets.credentials-path` | the shared credentials file; else the file `AWS_SHARED_CREDENTIALS_FILE` names, else `~/.aws/credentials` (`~` from `HOME`)
 `secrets.aws-profile` | the profile in that file; else `AWS_PROFILE`, else `default`
+`secrets.container-credentials-uri` | the container credentials endpoint; else `AWS_CONTAINER_CREDENTIALS_FULL_URI`, else `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` on `169.254.170.2`. http only to the ECS and EKS Pod Identity addresses or a loopback address; else https
+`secrets.container-authorization-token-file` | the file of that endpoint's authorization token; else `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`
+`secrets.instance-metadata-endpoint` | EC2 instance metadata; else `AWS_EC2_METADATA_SERVICE_ENDPOINT`, else `http://169.254.169.254`
 `secrets.endpoint` | the API endpoint, default `https://secretsmanager.<region>.amazonaws.com` (`amazonaws.com.cn` in the China regions): a VPC or FIPS endpoint, or a test server; https, plain http only for a loopback address
 `secrets.kms-key-id` | the KMS key for secrets that `addVersion` creates (key ID, ARN or alias); the account's `aws/secretsmanager` key when absent
 `secrets.replica-regions` | comma-separated regions to replicate secrets that `addVersion` creates to
@@ -40,16 +44,35 @@ try (SecretManagerClient client = SecretManagerClient.create(Map.of(
 
 ## Credentials
 
-This version reads credentials from the shared credentials file, as `aws configure` writes it: `aws_access_key_id`,
-`aws_secret_access_key` and, for temporary keys, `aws_session_token`, in the profile's section. The file is read into
-guarded memory and parsed there; only the access key ID, which is an identifier, becomes a `String`. The file is read
-on the first request, so a missing file or profile is reported then, before anything is sent. Long-term keys are
-kept; temporary ones (with a session token) are read from the file again every minute, so that a tool that renews
-them there, such as `aws configure export-credentials` or a SAML helper, is followed.
+Credentials come from the source `secrets.credentials` names, or else from the first of this chain that applies, in
+the order of the AWS SDKs where that keeps the guarantee:
 
-Not supported yet: the ECS container credentials endpoint, EC2 instance metadata (IMDSv2) and web identity (EKS
-IRSA). Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) are not read: the JVM holds the
-environment as `String`s on the heap.
+1. `AWS_ACCESS_KEY_ID` set: the client refuses to start. The JVM holds its environment as `String`s on the heap for
+   its whole life, so keys there are outside the guarantee whatever the client does. `secrets.credentials=environment`
+   uses them anyway (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`), for a platform that offers
+   nothing else, such as AWS Lambda. They are never skipped silently, since an application that sets them means them.
+2. `AWS_WEB_IDENTITY_TOKEN_FILE` set: refused; web identity (EKS IRSA) is not supported yet. EKS Pod Identity is.
+3. `profile`: the shared credentials file, when it is configured or `~/.aws/credentials` exists.
+4. `container`: the container credentials endpoint, when it is configured or the platform sets its variables: the
+   ECS task role (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`) and EKS Pod Identity (`AWS_CONTAINER_CREDENTIALS_FULL_URI`
+   with `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`). A token in `AWS_CONTAINER_AUTHORIZATION_TOKEN` is refused, for the
+   same reason as keys in the environment.
+5. `instance`: EC2 instance metadata, unless `AWS_EC2_METADATA_DISABLED` is `true`.
+
+Nothing is fetched until the first request, so a missing source is reported then, before anything is sent to Secrets
+Manager. Temporary credentials are fetched again five minutes before they expire.
+
+- **Shared credentials file**, as `aws configure` writes it: `aws_access_key_id`, `aws_secret_access_key` and, for
+  temporary keys, `aws_session_token`, in the profile's section. The file is read into guarded memory and parsed
+  there; only the access key ID, which is an identifier, becomes a `String`. Long-term keys are kept; temporary ones
+  are read from the file again every minute, so that a tool that renews them there, such as
+  `aws configure export-credentials` or a SAML helper, is followed.
+- **Container credentials endpoint.** The authorization token, if any, is read from its file into guarded memory on
+  each fetch (the platform rotates it) and sent from there. The response is read and parsed in guarded memory: the
+  secret access key and the session token are unescaped from it straight into their own guarded memory.
+- **EC2 instance metadata**, IMDSv2 only: a session token from `PUT /latest/api/token`, kept in guarded memory and
+  sent from there, then the instance profile's role and its credentials, parsed as above. IMDSv1, without a token, is
+  never used.
 
 ## Versions and values
 
@@ -90,9 +113,12 @@ The tests run against `FakeAws`, a local server (http or https) that keeps secre
 as AWS does, and checks every request's signature with a separate SigV4 implementation on the JDK, which is itself
 checked against AWS's published examples. They cover string and binary values, versions and stages, not-found,
 create-on-write and its race, the KMS key and replicas, temporary credentials, a wrong key, errors, malformed
-responses, timeouts, the credentials file, and the configuration. `AwsSecretsManagerCanaryTest` runs the canary gate:
-the canary is the secret access key or the session token, and the value, read and written back, over http and TLS;
-the child JVM's heap dump must not hold it.
+responses, timeouts, the credentials file, and the configuration. `FakeAws` also serves the container credentials
+endpoint and IMDSv2, for `AwsCredentialsTest`. `AwsSecretsManagerCanaryTest` runs the canary gate: the canary is the
+secret access key or the session token, the container authorization token or the IMDS session token, and the value
+(as `SecretString` and as `SecretBinary`), read and written back, over http and TLS; the child JVM's heap dump must
+not hold it. It also runs the default chain in a child JVM with an environment of its own: finding the container
+endpoint, and refusing keys and tokens in the environment.
 
 `AwsSecretsManagerLiveTest` runs against a real account when `SECRETS_AWS_TEST_REGION` is set (`just live-aws`),
 with the profile in `SECRETS_AWS_TEST_PROFILE`. It adds versions to the secrets `secrets-client-live-test` and

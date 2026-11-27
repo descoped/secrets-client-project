@@ -91,6 +91,23 @@ final class FakeAws implements AutoCloseable {
     volatile String sessionToken;
     /** Whether {@code /} in {@code SecretBinary} is sent escaped ({@code \/}), as JSON allows. */
     volatile boolean escapeSlashes;
+    /** The authorization token the container endpoint requires, or {@code null} for none (the ECS task role). */
+    volatile String containerToken;
+    /** The session token IMDS issues. */
+    volatile String instanceToken = "AQAEAInstanceToken==";
+    /** A session token IMDS issues but does not accept, or {@code null} to issue the one it accepts. */
+    volatile String issuedInstanceToken;
+    /** How long the temporary credentials the container endpoint and IMDS issue are valid. */
+    volatile java.time.Duration credentialsLifetime = java.time.Duration.ofHours(6);
+    /** Whether the credentials document has an expiration that is not a timestamp. */
+    volatile boolean malformedExpiration;
+    /** The requests to the container endpoint and IMDS: method, path and the token header they carried. */
+    final List<String> credentialRequests = new CopyOnWriteArrayList<>();
+
+    static final String CONTAINER_PATH = "/v2/credentials/task-1";
+    static final String ROLE = "app-role";
+    private static final String IMDS_TOKEN = "/latest/api/token";
+    private static final String IMDS_ROLES = "/latest/meta-data/iam/security-credentials/";
 
     FakeAws() throws IOException {
         this(null);
@@ -158,6 +175,11 @@ final class FakeAws implements AutoCloseable {
         byte[] body = exchange.getRequestBody().readAllBytes();
         Map<String, String> headers = new HashMap<>();
         exchange.getRequestHeaders().forEach((name, values) -> headers.put(name.toLowerCase(), values.get(0)));
+        String path = exchange.getRequestURI().getRawPath();
+        if (path.equals(CONTAINER_PATH) || path.startsWith("/latest/")) {
+            send(exchange, credentials(exchange.getRequestMethod(), path, headers));
+            return;
+        }
         String target = headers.getOrDefault("x-amz-target", "");
         requests.add(new Request(target, new String(body, StandardCharsets.UTF_8), headers));
         String refusal = verify(exchange, headers, body);
@@ -182,6 +204,43 @@ final class FakeAws implements AutoCloseable {
             case "CreateSecret" -> create(json);
             default -> error(400, "UnknownOperationException", "No operation " + operation);
         });
+    }
+
+    /** The container credentials endpoint and IMDSv2 (IMDSv1, without a token, is refused, as when it is off). */
+    private Response credentials(String method, String path, Map<String, String> headers) {
+        String imdsToken = headers.get("x-aws-ec2-metadata-token");
+        credentialRequests.add(method + " " + path + " " + (path.equals(CONTAINER_PATH)
+                ? headers.get("authorization") : imdsToken));
+        if (path.equals(CONTAINER_PATH)) {
+            if (containerToken != null && !containerToken.equals(headers.get("authorization"))) {
+                return new Response(403, "{\"Message\":\"Forbidden\"}");
+            }
+            return new Response(200, credentialsDocument(false));
+        }
+        if (method.equals("PUT") && path.equals(IMDS_TOKEN)) {
+            return headers.containsKey("x-aws-ec2-metadata-token-ttl-seconds")
+                    ? new Response(200, issuedInstanceToken != null ? issuedInstanceToken : instanceToken)
+                    : new Response(400, "Missing TTL");
+        }
+        if (!method.equals("GET") || !instanceToken.equals(imdsToken)) {
+            return new Response(401, "Unauthorized");
+        }
+        if (path.equals(IMDS_ROLES)) {
+            return new Response(200, ROLE + "\n");
+        }
+        if (path.equals(IMDS_ROLES + ROLE)) {
+            return new Response(200, credentialsDocument(true));
+        }
+        return new Response(404, "Not Found");
+    }
+
+    private String credentialsDocument(boolean instance) {
+        String expiration = malformedExpiration ? "soon" : java.time.Instant.now().plus(credentialsLifetime)
+                .truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString();
+        return "{" + (instance ? "\"Code\":\"Success\",\"Type\":\"AWS-HMAC\"," : "\"RoleArn\":\"arn:aws:iam::123456789012"
+                + ":role/" + ROLE + "\",") + "\"AccessKeyId\":\"" + ACCESS_KEY_ID + "\",\"SecretAccessKey\":"
+                + TestJson.quote(secretAccessKey).replace("/", "\\/") + ",\"Token\":" + TestJson.quote(sessionToken)
+                + ",\"Expiration\":\"" + expiration + "\"}";
     }
 
     /** The reason the signature is refused, or {@code null} if it is right. */

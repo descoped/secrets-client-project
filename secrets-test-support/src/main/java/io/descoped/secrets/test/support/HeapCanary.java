@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.CRC32C;
 
@@ -48,12 +49,14 @@ public final class HeapCanary {
     private final byte[] canary;
     private final Path file;
     private final Duration limit;
+    private final Map<String, String> environment;
 
-    private HeapCanary(Path dir, byte[] canary, Path file, Duration limit) {
+    private HeapCanary(Path dir, byte[] canary, Path file, Duration limit, Map<String, String> environment) {
         this.dir = dir;
         this.canary = canary;
         this.file = file;
         this.limit = limit;
+        this.environment = Map.copyOf(environment);
     }
 
     /**
@@ -89,7 +92,7 @@ public final class HeapCanary {
         System.arraycopy(canary, 0, content, prefix.length, LENGTH);
         System.arraycopy(suffix, 0, content, prefix.length + LENGTH, suffix.length);
         Path file = Files.write(dir.resolve("canary.secret"), content);
-        return new HeapCanary(dir, canary, file, TIMEOUT);
+        return new HeapCanary(dir, canary, file, TIMEOUT, Map.of());
     }
 
     /**
@@ -99,7 +102,18 @@ public final class HeapCanary {
      * @return the canary with that limit
      */
     public HeapCanary timeout(Duration limit) {
-        return new HeapCanary(dir, canary, file, limit);
+        return new HeapCanary(dir, canary, file, limit, environment);
+    }
+
+    /**
+     * The same canary, with environment variables set for the subject, on top of this JVM's own: for a subject that
+     * finds its configuration there, as a provider does on a platform.
+     *
+     * @param variables the variables
+     * @return the canary with them
+     */
+    public HeapCanary environment(Map<String, String> variables) {
+        return new HeapCanary(dir, canary, file, limit, variables);
     }
 
     /**
@@ -148,7 +162,9 @@ public final class HeapCanary {
         command.addAll(Arrays.asList(args));
         // Output to a file, not a pipe: reading a pipe would block until the subject exits, and the timeout would
         // never apply.
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+        ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile());
+        builder.environment().putAll(environment);
+        Process process = builder.start();
         if (!process.waitFor(limit.toMillis(), TimeUnit.MILLISECONDS)) {
             process.destroyForcibly().waitFor();
             throw new AssertionError("The subject did not finish within " + limit + ":\n"
