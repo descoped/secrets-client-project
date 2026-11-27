@@ -13,7 +13,7 @@ import java.util.Map;
  * The subject {@link AwsSecretsManagerCanaryTest} runs in a child JVM:
  * {@code <canary file> <dump file> <mode> <endpoint> [<CA file>]}. The canary file is a shared credentials file whose
  * secret access key or session token is the canary; FakeAws, in the test's JVM, serves the canary as the secret value
- * too. The subject reads the secret, checks it, writes it back with {@code addVersion(name, Secret)}, closes
+ * too, after three bytes that are not UTF-8 in the modes ending in {@code BINARY}. The subject reads the secret, checks it, writes it back with {@code addVersion(name, Secret)}, closes
  * everything and dumps its heap. With a CA file, FakeAws is on https and its certificate is in that PEM file.
  */
 public final class CanaryClient {
@@ -35,8 +35,10 @@ public final class CanaryClient {
         }
         try (SecretManagerClient client = SecretManagerClient.create(configuration);
              Secret secret = client.read("canary")) {
+            // A binary value has three bytes that are not UTF-8 before the canary.
+            long skip = args[2].endsWith("BINARY") ? 3 : 0;
             secret.withSegment(segment -> {
-                HeapDump.checksum(segment);
+                HeapDump.checksum(segment.asSlice(skip));
                 return null;
             });
             client.addVersion("copy", secret);

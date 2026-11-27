@@ -10,6 +10,9 @@ import java.lang.foreign.ValueLayout;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 
 /**
  * Static keys from the AWS shared credentials file ({@code ~/.aws/credentials}, INI): {@code aws_access_key_id},
@@ -23,23 +26,31 @@ final class SharedCredentialsFile implements CredentialsProvider.Source {
     /** Larger than any credentials file. */
     static final long MAX_LENGTH = 1024L * 1024;
 
-    private static final byte[] ACCESS_KEY_ID = ascii("aws_access_key_id");
-    private static final byte[] SECRET_ACCESS_KEY = ascii("aws_secret_access_key");
-    private static final byte[] SESSION_TOKEN = ascii("aws_session_token");
+    /**
+     * How long temporary keys from the file are used before the file is read again: tools that renew them, such as
+     * {@code aws configure export-credentials} or SAML helpers, write the new ones there.
+     */
+    static final Duration REREAD_TEMPORARY = Duration.ofMinutes(1);
+
+    private static final byte[] ACCESS_KEY_ID = utf8("aws_access_key_id");
+    private static final byte[] SECRET_ACCESS_KEY = utf8("aws_secret_access_key");
+    private static final byte[] SESSION_TOKEN = utf8("aws_session_token");
 
     private final SecretMemory memory;
     private final Path file;
     private final String profile;
     private final byte[] section;
+    private final Clock clock;
 
-    SharedCredentialsFile(SecretMemory memory, Path file, String profile) {
+    SharedCredentialsFile(SecretMemory memory, Path file, String profile, Clock clock) {
         this.memory = memory;
         this.file = file;
         this.profile = profile;
-        this.section = ascii(profile);
+        this.section = utf8(profile);
+        this.clock = clock;
     }
 
-    private static byte[] ascii(String text) {
+    private static byte[] utf8(String text) {
         return text.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -93,8 +104,12 @@ final class SharedCredentialsFile implements CredentialsProvider.Source {
                 StandardCharsets.US_ASCII);
         Secret secretAccessKey = copy(text, key);
         try {
-            Secret sessionToken = token[0] < 0 ? null : copy(text, token);
-            return new Credentials(accessKeyId, secretAccessKey, sessionToken, null);
+            if (token[0] < 0) {
+                return new Credentials(accessKeyId, secretAccessKey, null, null);
+            }
+            // Read again after a minute: the provider refreshes this long before the expiration it is given.
+            Instant reread = clock.instant().plus(CredentialsProvider.REFRESH_MARGIN).plus(REREAD_TEMPORARY);
+            return new Credentials(accessKeyId, secretAccessKey, copy(text, token), reread);
         } catch (RuntimeException e) {
             secretAccessKey.close();
             throw e;

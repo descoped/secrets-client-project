@@ -29,8 +29,12 @@ import java.util.regex.Pattern;
  */
 final class AwsSecretsManagerClient implements SecretManagerClient {
 
-    /** Names as Secrets Manager accepts them, and ARNs. */
-    static final Pattern SECRET_ID = Pattern.compile("[A-Za-z0-9/_+=.@:-]{1,2048}");
+    /** Names as Secrets Manager accepts them. */
+    static final Pattern SECRET_NAME_RULE = Pattern.compile("[A-Za-z0-9/_+=.@-]{1,512}");
+
+    /** Secret ARNs, in any partition. */
+    static final Pattern SECRET_ARN = Pattern.compile("arn:aws[a-z-]{0,20}:secretsmanager:[a-z0-9-]{1,30}:\\d{12}"
+            + ":secret:[A-Za-z0-9/_+=.@-]{1,512}");
 
     /** A version ID (a UUID, or another client request token of 32 to 64 characters). */
     static final Pattern VERSION_ID = Pattern.compile("[A-Za-z0-9-]{32,64}");
@@ -43,35 +47,50 @@ final class AwsSecretsManagerClient implements SecretManagerClient {
     private static final String TARGET = "secretsmanager.";
     private static final String NOT_FOUND = "ResourceNotFoundException";
     private static final String EXISTS = "ResourceExistsException";
+    private static final String VERSION_ID_FIELD = "VersionId";
 
-    private final Http.Target api;
+    /**
+     * What the client talks to and how.
+     *
+     * @param api            the endpoint
+     * @param timeouts       how long to wait
+     * @param kmsKeyId       the KMS key of created secrets, or {@code null}
+     * @param replicaRegions the regions to replicate created secrets to
+     */
+    record Settings(Http.Target api, Http.Timeouts timeouts, String kmsKeyId, List<String> replicaRegions) {
+
+        Settings {
+            replicaRegions = List.copyOf(replicaRegions);
+        }
+    }
+
+    private final Settings settings;
     private final SigV4 signer;
-    private final Http.Timeouts timeouts;
     private final SecretMemory memory;
     private final CredentialsProvider credentials;
     private final TlsContext tls;
-    private final String kmsKeyId;
-    private final List<String> replicaRegions;
     private final Clock clock;
     private volatile boolean closed;
 
-    AwsSecretsManagerClient(Http.Target api, SigV4 signer, Http.Timeouts timeouts, SecretMemory memory,
-                            CredentialsProvider credentials, TlsContext tls, String kmsKeyId,
-                            List<String> replicaRegions, Clock clock) {
-        this.api = api;
+    AwsSecretsManagerClient(Settings settings, SigV4 signer, SecretMemory memory, CredentialsProvider credentials,
+                            TlsContext tls, Clock clock) {
+        this.settings = settings;
         this.signer = signer;
-        this.timeouts = timeouts;
         this.memory = memory;
         this.credentials = credentials;
         this.tls = tls;
-        this.kmsKeyId = kmsKeyId;
-        this.replicaRegions = List.copyOf(replicaRegions);
         this.clock = clock;
+    }
+
+    /** Whether Secrets Manager can hold {@code secretId}: a name, or the ARN of a secret. */
+    static boolean isSecretId(String secretId) {
+        return SECRET_NAME_RULE.matcher(secretId).matches() || SECRET_ARN.matcher(secretId).matches();
     }
 
     /**
      * Reads a version: {@code null} or {@code latest} is the current one ({@code AWSCURRENT}), a version ID selects
-     * that version, and anything else is a staging label, such as {@code AWSPREVIOUS}.
+     * that version, and anything else is a staging label, such as {@code AWSPREVIOUS}. A staging label of 32 to 64
+     * letters, digits and hyphens that does not start with {@code AWS} is taken for a version ID.
      */
     @Override
     public Secret read(String secretName, String secretVersion) {
@@ -79,7 +98,7 @@ final class AwsSecretsManagerClient implements SecretManagerClient {
         checkOpen();
         String version = secretVersion == null || secretVersion.equals("latest") ? "AWSCURRENT" : secretVersion;
         // A name or version Secrets Manager cannot hold does not exist; no request is sent for it.
-        if (!SECRET_ID.matcher(secretName).matches() || !VERSION_STAGE.matcher(version).matches()) {
+        if (!isSecretId(secretName) || !VERSION_STAGE.matcher(version).matches()) {
             throw new SecretNotFoundException(secretName, secretVersion);
         }
         String selector = VERSION_ID.matcher(version).matches() && !version.startsWith("AWS")
@@ -108,50 +127,60 @@ final class AwsSecretsManagerClient implements SecretManagerClient {
         Objects.requireNonNull(secretName, SECRET_NAME);
         Objects.requireNonNull(secretValue, SECRET_VALUE);
         checkOpen();
-        if (!SECRET_ID.matcher(secretName).matches()) {
+        if (!isSecretId(secretName)) {
             throw new SecretManagerException("Invalid secret name '" + secretName
-                    + "': Secrets Manager allows 1 to 512 letters, digits and /_+=.@-, or an ARN");
+                    + "': Secrets Manager allows 1 to 512 letters, digits and /_+=.@-, or a secret's ARN");
         }
         return secretValue.withSegment(value -> {
-            for (int attempt = 0; ; attempt++) {
-                try (Http.Response put = write("PutSecretValue", putPrefix(secretName), value, secretName)) {
-                    if (put.status() == 200) {
-                        return field(put.body(), "VersionId", secretName);
-                    }
-                    AwsError error = AwsError.of(put);
-                    if (!error.is(NOT_FOUND) || attempt > 0) {
-                        throw error.exception("adding a version to", secretName);
-                    }
-                }
-                try (Http.Response create = write("CreateSecret", createPrefix(secretName), value, secretName)) {
-                    if (create.status() == 200) {
-                        return field(create.body(), "VersionId", secretName);
-                    }
-                    AwsError error = AwsError.of(create);
-                    // Created by someone else in the meantime: add the version to theirs.
-                    if (!error.is(EXISTS)) {
-                        throw error.exception("creating", secretName);
-                    }
-                }
-            }
+            String added = putValue(secretName, value, false);
+            // Not found: create it with the value, or, if someone else created it meanwhile, add to theirs.
+            return added != null ? added : createOrPut(secretName, value);
         });
     }
 
-    private String putPrefix(String secretName) {
+    /** {@code PutSecretValue}: the new version ID, or {@code null} if the secret does not exist and that is allowed. */
+    private String putValue(String secretName, MemorySegment value, boolean mustExist) {
+        try (Http.Response put = write("PutSecretValue", putPrefix(secretName), value, secretName)) {
+            if (put.status() == 200) {
+                return field(put.body(), VERSION_ID_FIELD, secretName);
+            }
+            AwsError error = AwsError.of(put);
+            if (mustExist || !error.is(NOT_FOUND)) {
+                throw error.exception("adding a version to", secretName);
+            }
+            return null;
+        }
+    }
+
+    private String createOrPut(String secretName, MemorySegment value) {
+        try (Http.Response create = write("CreateSecret", createPrefix(secretName), value, secretName)) {
+            if (create.status() == 200) {
+                return field(create.body(), VERSION_ID_FIELD, secretName);
+            }
+            AwsError error = AwsError.of(create);
+            if (!error.is(EXISTS)) {
+                throw error.exception("creating", secretName);
+            }
+        }
+        return putValue(secretName, value, true);
+    }
+
+    private static String putPrefix(String secretName) {
         return "{\"SecretId\":\"" + secretName + "\",\"ClientRequestToken\":\"" + UUID.randomUUID() + "\"";
     }
 
     private String createPrefix(String secretName) {
         StringBuilder json = new StringBuilder("{\"Name\":\"").append(secretName)
                 .append("\",\"ClientRequestToken\":\"").append(UUID.randomUUID()).append('"');
-        if (kmsKeyId != null) {
+        if (settings.kmsKeyId() != null) {
             // Checked to be a key ID, ARN or alias, which need no escaping.
-            json.append(",\"KmsKeyId\":\"").append(kmsKeyId).append('"');
+            json.append(",\"KmsKeyId\":\"").append(settings.kmsKeyId()).append('"');
         }
-        if (!replicaRegions.isEmpty()) {
+        List<String> replicas = settings.replicaRegions();
+        if (!replicas.isEmpty()) {
             json.append(",\"AddReplicaRegions\":[");
-            for (int i = 0; i < replicaRegions.size(); i++) {
-                json.append(i == 0 ? "" : ",").append("{\"Region\":\"").append(replicaRegions.get(i)).append("\"}");
+            for (int i = 0; i < replicas.size(); i++) {
+                json.append(i == 0 ? "" : ",").append("{\"Region\":\"").append(replicas.get(i)).append("\"}");
             }
             json.append(']');
         }
@@ -202,11 +231,12 @@ final class AwsSecretsManagerClient implements SecretManagerClient {
 
     /** Signs and sends one operation with {@code body}. */
     private Http.Response send(String operation, MemorySegment body, String secretName, String action) {
+        Http.Target api = settings.api();
         Secret request = credentials.withCredentials(c -> signer
                 .sign(c, api.hostHeader(), TARGET + operation, body, clock.instant())
                 .request(memory, api, body));
         try (request) {
-            return Http.exchange(api, request, timeouts, memory);
+            return Http.exchange(api, request, settings.timeouts(), memory);
         } catch (InterruptedIOException e) {
             if (e instanceof SocketTimeoutException) {
                 throw new SecretManagerException("Timed out " + action + " secret '" + secretName + "'", e);
@@ -317,8 +347,8 @@ final class AwsSecretsManagerClient implements SecretManagerClient {
                     if (object.string("__type") != null) {
                         result[0] = Json.text(json, object.string("__type"));
                     }
-                    Json.Str message = object.string("message") != null ? object.string("message")
-                            : object.string("Message");
+                    // JSON 1.1 services spell it either way.
+                    Json.Str message = object.string(object.fields().containsKey("message") ? "message" : "Message");
                     if (message != null) {
                         result[1] = Json.text(json, message);
                     }

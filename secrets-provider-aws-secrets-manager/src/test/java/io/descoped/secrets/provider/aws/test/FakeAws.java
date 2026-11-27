@@ -89,6 +89,8 @@ final class FakeAws implements AutoCloseable {
     volatile String secretAccessKey = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
     /** The session token requests must carry and sign, or {@code null} for long-term keys. */
     volatile String sessionToken;
+    /** Whether {@code /} in {@code SecretBinary} is sent escaped ({@code \/}), as JSON allows. */
+    volatile boolean escapeSlashes;
 
     FakeAws() throws IOException {
         this(null);
@@ -237,7 +239,8 @@ final class FakeAws implements AutoCloseable {
         if (version.string() != null) {
             out.append(",\"SecretString\":").append(TestJson.quote(version.string()));
         } else {
-            out.append(",\"SecretBinary\":\"").append(Base64.getEncoder().encodeToString(version.binary()))
+            String base64 = Base64.getEncoder().encodeToString(version.binary());
+            out.append(",\"SecretBinary\":\"").append(escapeSlashes ? base64.replace("/", "\\/") : base64)
                     .append('"');
         }
         out.append(",\"VersionId\":\"").append(version.id()).append("\",\"VersionStages\":[")

@@ -39,8 +39,9 @@ import java.util.regex.Pattern;
  *     <tr><td>{@value #PROFILE_KEY}</td><td>the profile in that file; else {@code AWS_PROFILE}, else
  *     {@code default}</td></tr>
  *     <tr><td>{@value #ENDPOINT_KEY}</td><td>the API endpoint, default
- *     {@code https://secretsmanager.<region>.amazonaws.com}; another host serving the same API, such as a VPC or FIPS
- *     endpoint or a test server. It must use https; plain http only for a loopback address.</td></tr>
+ *     {@code https://secretsmanager.<region>.amazonaws.com} ({@code amazonaws.com.cn} in the China regions); another
+ *     host serving the same API, such as a VPC or FIPS endpoint or a test server. It must use https; plain http only
+ *     for a loopback address.</td></tr>
  *     <tr><td>{@value #KMS_KEY_ID_KEY}</td><td>the KMS key for secrets that {@code addVersion} creates: a key ID, an
  *     ARN or an alias; the account's {@code aws/secretsmanager} key when absent</td></tr>
  *     <tr><td>{@value #REPLICA_REGIONS_KEY}</td><td>comma-separated regions to replicate secrets that
@@ -54,13 +55,14 @@ import java.util.regex.Pattern;
  *     {@link SecretMemory}</td></tr>
  * </table>
  *
- * <p>Credentials come from the shared credentials file: static keys, or temporary ones with a session token. Other
- * sources (the ECS container endpoint, EC2 instance metadata, web identity) are not supported yet.
+ * <p>Credentials come from the shared credentials file: static keys, or temporary ones with a session token, which
+ * are read from the file again every minute, so that a tool that renews them there is followed. Other sources (the
+ * ECS container endpoint, EC2 instance metadata, web identity) are not supported yet.
  *
  * <p>Versions: {@code latest} (or {@code null}) is the current version ({@code AWSCURRENT}); a version ID selects
  * that version, and any other string is a staging label, such as {@code AWSPREVIOUS}. {@code addVersion} returns the
- * new version ID. Names are 1 to 512 letters, digits and {@code /_+=.@-}, or an ARN; reading a name or version
- * outside that rule is a {@link io.descoped.secrets.api.SecretNotFoundException} and sends no request.
+ * new version ID. Names are 1 to 512 letters, digits and {@code /_+=.@-}, or a secret's ARN; reading a name or
+ * version outside that rule is a {@link io.descoped.secrets.api.SecretNotFoundException} and sends no request.
  */
 @ProviderName("aws-secrets-manager")
 public final class AwsSecretsManagerClientInitializer implements SecretManagerClientInitializer {
@@ -92,7 +94,8 @@ public final class AwsSecretsManagerClientInitializer implements SecretManagerCl
     /** The configuration key for a PEM file of the only certificates to trust, instead of the system's. */
     public static final String CA_FILE_KEY = "secrets.tls.ca-file";
 
-    private static final Pattern REGION = Pattern.compile("[a-z]{2}(-[a-z0-9]+)+-\\d{1,2}");
+    /** {@code eu-north-1}, {@code us-gov-west-1}, {@code ap-southeast-5}. */
+    private static final Pattern REGION = Pattern.compile("[a-z]{2}(?:-[a-z]{1,12}){1,3}-\\d{1,2}");
     private static final Pattern KMS_KEY_ID = Pattern.compile("[A-Za-z0-9:/_-]{1,2048}");
     private static final Duration MAX_TIMEOUT = Duration.ofHours(1);
 
@@ -111,8 +114,10 @@ public final class AwsSecretsManagerClientInitializer implements SecretManagerCl
     @Override
     public SecretManagerClient initialize(Map<String, String> configuration) {
         String region = region(configuration);
+        // The China regions are a partition of their own, with their own domain.
+        String domain = region.startsWith("cn-") ? "amazonaws.com.cn" : "amazonaws.com";
         URI endpoint = httpsOrLoopback(ENDPOINT_KEY, configuration.getOrDefault(ENDPOINT_KEY,
-                "https://secretsmanager." + region + ".amazonaws.com"));
+                "https://secretsmanager." + region + "." + domain));
         String kmsKeyId = configuration.get(KMS_KEY_ID_KEY);
         if (kmsKeyId != null && !KMS_KEY_ID.matcher(kmsKeyId).matches()) {
             throw new IllegalArgumentException("Invalid '" + KMS_KEY_ID_KEY + "': " + kmsKeyId);
@@ -123,23 +128,28 @@ public final class AwsSecretsManagerClientInitializer implements SecretManagerCl
                 duration(configuration, REQUEST_TIMEOUT_KEY, Duration.ofSeconds(30)));
         Path file = credentialsFile(configuration);
         String profile = firstOf(configuration.get(PROFILE_KEY), System.getenv("AWS_PROFILE"), "default");
-        String caFile = configuration.get(CA_FILE_KEY);
-        TlsContext tls = "https".equalsIgnoreCase(endpoint.getScheme())
-                ? TlsContext.create(caFile == null ? null : Path.of(caFile)) : null;
+        TlsContext tls = "https".equalsIgnoreCase(endpoint.getScheme()) ? tlsContext(configuration) : null;
         try {
             SecretMemory memory = SecretMemory.create(configuration);
             Clock clock = Clock.systemUTC();
             CredentialsProvider credentials = new CredentialsProvider(
-                    new SharedCredentialsFile(memory, file, profile), clock);
-            return new AwsSecretsManagerClient(Http.Target.of(endpoint, tls),
-                    new SigV4(memory, region, "secretsmanager"), timeouts, memory, credentials, tls, kmsKeyId,
-                    replicas, clock);
+                    new SharedCredentialsFile(memory, file, profile, clock), clock);
+            AwsSecretsManagerClient.Settings settings = new AwsSecretsManagerClient.Settings(
+                    Http.Target.of(endpoint, tls), timeouts, kmsKeyId, replicas);
+            return new AwsSecretsManagerClient(settings, new SigV4(memory, region, "secretsmanager"), memory,
+                    credentials, tls, clock);
         } catch (RuntimeException e) {
             if (tls != null) {
                 tls.close();
             }
             throw e;
         }
+    }
+
+    private static TlsContext tlsContext(Map<String, String> configuration) {
+        String caFile = configuration.get(CA_FILE_KEY);
+        Path path = caFile == null ? null : Path.of(caFile);
+        return TlsContext.create(path);
     }
 
     private static String region(Map<String, String> configuration) {

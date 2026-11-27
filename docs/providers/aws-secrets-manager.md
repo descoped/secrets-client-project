@@ -21,7 +21,7 @@ Key | Description
 `secrets.region` | the region, such as `eu-north-1`; else `AWS_REGION`, else `AWS_DEFAULT_REGION` (required)
 `secrets.credentials-path` | the shared credentials file; else the file `AWS_SHARED_CREDENTIALS_FILE` names, else `~/.aws/credentials`
 `secrets.aws-profile` | the profile in that file; else `AWS_PROFILE`, else `default`
-`secrets.endpoint` | the API endpoint, default `https://secretsmanager.<region>.amazonaws.com`: a VPC or FIPS endpoint, or a test server; https, plain http only for a loopback address
+`secrets.endpoint` | the API endpoint, default `https://secretsmanager.<region>.amazonaws.com` (`amazonaws.com.cn` in the China regions): a VPC or FIPS endpoint, or a test server; https, plain http only for a loopback address
 `secrets.kms-key-id` | the KMS key for secrets that `addVersion` creates (key ID, ARN or alias); the account's `aws/secretsmanager` key when absent
 `secrets.replica-regions` | comma-separated regions to replicate secrets that `addVersion` creates to
 `secrets.connect-timeout` | ISO-8601 duration for connecting, default `PT10S`
@@ -43,7 +43,9 @@ try (SecretManagerClient client = SecretManagerClient.create(Map.of(
 This version reads credentials from the shared credentials file, as `aws configure` writes it: `aws_access_key_id`,
 `aws_secret_access_key` and, for temporary keys, `aws_session_token`, in the profile's section. The file is read into
 guarded memory and parsed there; only the access key ID, which is an identifier, becomes a `String`. The file is read
-on the first request, so a missing file or profile is reported then, before anything is sent.
+on the first request, so a missing file or profile is reported then, before anything is sent. Long-term keys are
+kept; temporary ones (with a session token) are read from the file again every minute, so that a tool that renews
+them there, such as `aws configure export-credentials` or a SAML helper, is followed.
 
 Not supported yet: the ECS container credentials endpoint, EC2 instance metadata (IMDSv2) and web identity (EKS
 IRSA). Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) are not read: the JVM holds the
@@ -53,14 +55,15 @@ environment as `String`s on the heap.
 
 - `read(name)` and `read(name, "latest")` read the current version (`AWSCURRENT`).
 - `read(name, version)` with a version ID reads that version; any other string is a staging label, such as
-  `AWSPREVIOUS`.
+  `AWSPREVIOUS`. A custom staging label of 32 to 64 letters, digits and hyphens that does not start with `AWS` looks
+  like a version ID, and is read as one.
 - `addVersion(name, value)` adds a version as `AWSCURRENT`, the previous one becoming `AWSPREVIOUS`, and returns its
   version ID. If the secret does not exist, it is created with the value (with `secrets.kms-key-id` and
   `secrets.replica-regions`). Each request carries a new client request token, so a retried request never adds a
   second version.
 - A value that is valid UTF-8 is written as `SecretString`, as other AWS tools expect, and any other value as
   `SecretBinary`. Both are read back as the same bytes.
-- Names are 1 to 512 letters, digits and `/_+=.@-`, or an ARN. Reading a name or version outside that rule is a
+- Names are 1 to 512 letters, digits and `/_+=.@-`, or a secret's ARN. Reading a name or version outside that rule is a
   `SecretNotFoundException`, and `addVersion` with such a name a `SecretManagerException`; neither sends a request.
   A missing secret or version is a `SecretNotFoundException`.
 - Errors name the HTTP status, AWS's error type and message (such as `AccessDeniedException`), never the response

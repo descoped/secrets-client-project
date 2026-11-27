@@ -46,13 +46,12 @@ class AwsSecretsManagerClientTest {
     }
 
     private Map<String, String> configuration() throws IOException {
-        Map<String, String> configuration = new HashMap<>(Map.of(
+        return new HashMap<>(Map.of(
                 "secrets.provider", "aws-secrets-manager",
                 "secrets.region", FakeAws.REGION,
                 "secrets.endpoint", aws.endpoint(),
                 "secrets.credentials-path", aws.credentialsFile(dir, "test").toString(),
                 "secrets.aws-profile", "test"));
-        return configuration;
     }
 
     private SecretManagerClient open() throws IOException {
@@ -107,14 +106,34 @@ class AwsSecretsManagerClientTest {
         }
     }
 
+    /** A secret's ARN is accepted as its ID, and sent as it is. */
+    @Test
+    void anArnReadsTheSecret() throws IOException {
+        String arn = "arn:aws:secretsmanager:eu-north-1:123456789012:secret:app/db-AbCdEf";
+        aws.put(arn, "v1", "by arn", null);
+        try (SecretManagerClient client = open()) {
+            assertEquals("by arn", Values.text(client, arn));
+        }
+    }
+
     @ParameterizedTest
-    @ValueSource(strings = {"", "has space", "quote\"", "back\\slash", "ünïcode"})
+    @ValueSource(strings = {"", "has space", "quote\"", "back\\slash", "ünïcode", "colon:name",
+            "arn:aws:iam::123456789012:user/someone"})
     void anInvalidNameIsNotFoundWithoutARequest(String name) throws IOException {
         try (SecretManagerClient client = open()) {
             assertThrows(SecretNotFoundException.class, () -> client.read(name));
             assertThrows(SecretNotFoundException.class, () -> client.read("s", "bad version"));
             SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.add(client, name, "v"));
             assertFalse(e instanceof SecretNotFoundException);
+        }
+        assertTrue(aws.requests.isEmpty());
+    }
+
+    /** Names are at most 512 characters; only ARNs are longer. */
+    @Test
+    void aNameLongerThan512IsNotFoundWithoutARequest() throws IOException {
+        try (SecretManagerClient client = open()) {
+            assertThrows(SecretNotFoundException.class, () -> client.read("n".repeat(513)));
         }
         assertTrue(aws.requests.isEmpty());
     }
