@@ -24,7 +24,7 @@ mkdir -p "$out/lib" "$out/classes"
     dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory="$out/lib"
 version=$(sed -n 's/^version=//p' secrets-client-api/target/maven-archiver/pom.properties)
 for module in secrets-client-api secrets-provider-safe-configuration secrets-provider-dynamic-configuration \
-    secrets-provider-google-secret-manager; do
+    secrets-provider-google-secret-manager secrets-provider-mounted; do
     cp "$module/target/$module-$version.jar" "$out/lib/"
 done
 
@@ -33,13 +33,13 @@ javac --release "$release" -Xlint:all -Werror --module-path "$out/lib" --module-
 
 echo "== module descriptors"
 for module in secrets-client-api secrets-provider-safe-configuration secrets-provider-dynamic-configuration \
-    secrets-provider-google-secret-manager; do
+    secrets-provider-google-secret-manager secrets-provider-mounted; do
     jar --describe-module --file "$out/lib/$module-$version.jar" | head -1
 done
 
 echo "== jdeps: requires that are missing or unused"
 jdeps --multi-release "$release" --module-path "$out/lib" --check \
-    io.descoped.secrets.api,io.descoped.secrets.provider.safe,io.descoped.secrets.provider.dynamic,io.descoped.secrets.provider.google
+    io.descoped.secrets.api,io.descoped.secrets.provider.safe,io.descoped.secrets.provider.dynamic,io.descoped.secrets.provider.google,io.descoped.secrets.provider.mounted
 
 # Guarded memory (safe-configuration, and every provider's read) needs native access for the API module.
 echo "== module path"

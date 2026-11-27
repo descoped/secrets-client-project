@@ -29,6 +29,7 @@ Provider name | Module
 `safe-configuration` | [secrets-provider-safe-configuration](providers/safe-configuration.md)
 `dynamic-configuration` | [secrets-provider-dynamic-configuration](providers/dynamic-configuration.md)
 `google-secret-manager` | [secrets-provider-google-secret-manager](providers/google-secret-manager.md)
+`mounted` | [secrets-provider-mounted](providers/mounted.md)
 
 Because the provider is chosen by configuration, the application code stays the same in every environment: a local
 file on a laptop, Google Secret Manager in production. Build the map from whatever configuration the application

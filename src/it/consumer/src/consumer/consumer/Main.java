@@ -43,6 +43,20 @@ public final class Main {
             check("dynamic-configuration", "42", client.readString("answer"));
         }
 
+        Path mount = Files.createTempDirectory("mounted");
+        try {
+            Files.writeString(mount.resolve("answer"), "42");
+            try (SecretManagerClient client = SecretManagerClient.create(Map.of(
+                    "secrets.provider", "mounted",
+                    "secrets.mounted.directory", mount.toString()));
+                 Secret answer = client.read("answer")) {
+                check("mounted guarded read", "42", answer.withChars(String::new));
+            }
+        } finally {
+            Files.deleteIfExists(mount.resolve("answer"));
+            Files.deleteIfExists(mount);
+        }
+
         // The Google provider must resolve and load, with no dependency but the API: a client that would take its
         // token from a metadata server on loopback is built; no request is sent.
         SecretManagerClient.create(Map.of(

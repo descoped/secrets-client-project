@@ -17,6 +17,7 @@ true when behaviour changes.
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
 | `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | read-only, on `io.descoped.config:dynamic-configuration` 3.x, for tests and migration |
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory: its own HTTP/1.1 client (`SSLEngine`), JSON reader and Base64; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
+| `secrets-provider-mounted` | `io.descoped.secrets.provider.mounted` | read-only: secrets the platform mounts as files (Cloud Run, Kubernetes, Secrets Store CSI), read into guarded memory on every read; no network, no credential |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
 (old tags prefixed with the module name, e.g. `secrets-client-api/2.0.3`). 3.0.0 (2026-11-17) is the first release
