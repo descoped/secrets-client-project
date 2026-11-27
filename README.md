@@ -9,8 +9,9 @@ keys that grant access to them, are held in guarded memory off the Java heap, ov
 needed, and never appear in exception messages. Every path is proven by heap-dump tests. Java 25 or later, on Linux
 or macOS, on the module path or the class path.
 
-**[Documentation](docs/README.md)**: getting started, the API, [the security model](docs/security.md), each
-provider, and migrating from earlier versions.
+**[Documentation](https://ssc.descoped.io)** (the same pages are in [docs/](docs/README.md)): getting started, the
+API, the architecture, the protocols, the topology, the deployment models, the sequence flows,
+[the security model](docs/security.md), each provider, and migrating from earlier versions.
 
 Changes by version are in the [changelog](CHANGELOG.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -45,11 +46,12 @@ secrets-client-api/                        the API and the provider service
 secrets-provider-safe-configuration/       provider: a local key=value file, for development and tests
 secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST, no dependency but the API)
 secrets-provider-mounted/                  provider: secrets the platform mounts as files, read-only
-secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API with SigV4, no dependency but the API)
+secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API, SigV4; no dependency but the API)
 secrets-client-bom/                        BOM of the modules above
 secrets-test-support/                      test support: the canary heap-dump harness (never published)
 src/it/consumer/                           JPMS smoke test: an application using every provider
-docs/                                      user documentation
+docs/                                      user documentation, published by the site
+site/                                      the documentation site (krantho, static), https://ssc.descoped.io
 ```
 
 Requires JDK 25 or later; the Maven Wrapper brings Maven. The [`justfile`](justfile) holds the regular tasks
@@ -74,9 +76,11 @@ Without just, the same with Maven: `./mvnw verify`, `./mvnw verify javadoc:javad
   APIs and of the credential endpoints. The live tests (`just live-google`, `just live-aws`) run against real
   accounts only when their variables are set, never in CI.
 - Pull requests run CI (build, tests, Javadoc, smoke test) and an automated review; SonarCloud analyses pushes and
-  pull requests from this repository, without gating the build. Releases are
-  published to Maven Central by hand ([releasing](docs/releasing.md)). SNAPSHOTs of `master`, and of a branch when run by hand
-  (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/`, never to Maven Central (see [getting started](docs/getting-started.md)).
+  pull requests from this repository, without gating the build. A change to `docs/` or `site/` on `master` publishes
+  the site (`.github/workflows/pages.yml`); `cd site && pnpm install && pnpm dev` shows it locally.
+- Releases are published to Maven Central by hand ([RELEASING.md](RELEASING.md)). SNAPSHOTs of `master`, and of a
+  branch when run by hand (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/`, never to
+  Maven Central (see [getting started](docs/getting-started.md)).
 
 ## License
 
