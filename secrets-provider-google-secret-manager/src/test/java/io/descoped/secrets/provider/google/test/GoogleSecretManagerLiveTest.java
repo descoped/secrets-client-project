@@ -5,6 +5,7 @@ import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretNotFoundException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.io.IOException;
@@ -36,15 +37,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * Default Credentials as the provider finds them; {@code SECRETS_GOOGLE_TEST_CREDENTIALS=metadata} uses only the
  * metadata server (on Google Cloud, such as a Cloud Run job). It adds versions to the secret
  * {@code secrets-client-live-test}, creating it with automatic replication if needed, and afterwards destroys all
- * enabled versions but the newest {@value #KEEP} (active versions are billed).
+ * enabled versions but the newest {@value #KEEP} (active versions are billed). Not run when
+ * {@code SECRETS_MOUNTED_TEST_DIRECTORY} is set, so that it never runs beside {@link MountedSecretLiveTest}.
  */
 @EnabledIfEnvironmentVariable(named = "SECRETS_GOOGLE_TEST_PROJECT", matches = ".+")
+// It adds versions, which would change what MountedSecretLiveTest compares the mounted file with.
+@DisabledIfEnvironmentVariable(named = "SECRETS_MOUNTED_TEST_DIRECTORY", matches = ".+")
 class GoogleSecretManagerLiveTest {
 
-    private static final String SECRET = "secrets-client-live-test";
+    static final String SECRET = "secrets-client-live-test";
     private static final int KEEP = 2;
 
-    private static Map<String, String> configuration() {
+    /** The configuration of a client of the live project, with the credentials the environment names. */
+    static Map<String, String> configuration() {
         Map<String, String> configuration = new HashMap<>(Map.of(
                 "secrets.provider", "google-secret-manager",
                 "secrets.project-id", System.getenv("SECRETS_GOOGLE_TEST_PROJECT")));
