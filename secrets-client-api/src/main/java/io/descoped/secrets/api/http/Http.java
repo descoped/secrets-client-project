@@ -150,9 +150,18 @@ public final class Http {
      * @param secretHeaders headers whose values are secret, written after the others
      * @param body          the body, or {@code null} for none
      * @return the request, for {@link #exchange}; the caller closes it
+     * @throws IllegalArgumentException if a secret header's value has a control character, such as CR or LF, which
+     *                                  would end the header and start another
      */
     public static Secret request(SecretMemory memory, Target target, String method, String path, List<String> headers,
                                  List<SecretHeader> secretHeaders, MemorySegment body) {
+        for (SecretHeader header : secretHeaders) {
+            if (hasControl(header.value())) {
+                // The name only: the value is secret.
+                throw new IllegalArgumentException("The value of the header " + header.name()
+                        + " has a control character");
+            }
+        }
         StringBuilder head = new StringBuilder()
                 .append(method).append(' ').append(target.path()).append(path).append(" HTTP/1.1\r\n")
                 .append("Host: ").append(target.hostHeader()).append("\r\n")
@@ -185,6 +194,17 @@ public final class Http {
                 Codec.putSegment(out, pos, body);
             }
         });
+    }
+
+    /** Whether {@code value} has a byte that a header value may not: a control character other than tab (RFC 9110). */
+    private static boolean hasControl(MemorySegment value) {
+        for (long i = 0; i < value.byteSize(); i++) {
+            byte b = value.get(ValueLayout.JAVA_BYTE, i);
+            if (b >= 0 && b < 0x20 && b != '\t' || b == 0x7F) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

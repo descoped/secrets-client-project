@@ -67,11 +67,13 @@ import java.util.regex.Pattern;
  * the source {@value #CREDENTIALS_KEY} names, or the first of this chain that applies:
  *
  * <ol>
+ *     <li>{@code profile}, when the configuration names a file or a profile, whatever the environment holds;</li>
  *     <li>{@code AWS_ACCESS_KEY_ID} set: the client refuses to start, since keys in the environment are on the Java
  *     heap; {@code environment} uses them anyway, outside the guarantee (for AWS Lambda);</li>
  *     <li>{@code AWS_WEB_IDENTITY_TOKEN_FILE} set: refused, web identity (EKS IRSA) is not supported yet;</li>
- *     <li>{@code profile}: the shared credentials file, when it is configured or {@code ~/.aws/credentials} exists.
- *     Static keys, or temporary ones, which are read from the file again every minute;</li>
+ *     <li>{@code profile}: the shared credentials file, when it exists ({@code AWS_SHARED_CREDENTIALS_FILE}, else
+ *     {@code ~/.aws/credentials}). Static keys, or temporary ones, which are read from the file again every
+ *     minute;</li>
  *     <li>{@code container}: the container credentials endpoint (ECS task role, EKS Pod Identity), when it is
  *     configured or the platform sets its variables;</li>
  *     <li>{@code instance}: EC2 instance metadata, IMDSv2 only, unless {@code AWS_EC2_METADATA_DISABLED} is

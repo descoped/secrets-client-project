@@ -15,11 +15,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The credential sources against {@link FakeAws}: the container credentials endpoint (ECS task role, EKS Pod
@@ -189,7 +191,21 @@ class AwsCredentialsTest {
     void anHttpsContainerEndpointOnAnyHostIsAccepted() {
         Map<String, String> configuration = container();
         configuration.put("secrets.container-credentials-uri", "https://credentials.example.com/v1/credentials");
-        SecretManagerClient.create(configuration).close();
+        assertDoesNotThrow(() -> SecretManagerClient.create(configuration).close());
+    }
+
+    /** A token with a line break would end the header and start another: refused, without the token. */
+    @Test
+    void aTokenWithALineBreakIsRefused() throws IOException {
+        aws.containerToken = "a";
+        Map<String, String> configuration = container();
+        configuration.put("secrets.container-authorization-token-file",
+                Files.writeString(dir.resolve("token"), "a\r\nX-Injected: yes\n").toString());
+        try (SecretManagerClient client = SecretManagerClient.create(configuration)) {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> client.read("s"));
+            assertEquals("The value of the header Authorization has a control character", e.getMessage());
+        }
+        assertTrue(aws.credentialRequests.isEmpty(), "nothing was sent");
     }
 
     @Test
@@ -206,9 +222,10 @@ class AwsCredentialsTest {
         assertTrue(rootOf(e).getMessage().startsWith("No container credentials endpoint"), rootOf(e).getMessage());
     }
 
-    /** The test JVM has no AWS keys in its environment, so {@code environment} has nothing to use. */
+    /** Without AWS keys in this JVM's environment, {@code environment} has nothing to use. */
     @Test
     void theEnvironmentSourceNeedsBothKeys() {
+        assumeTrue(System.getenv("AWS_ACCESS_KEY_ID") == null, "AWS keys are in this JVM's environment");
         try (SecretManagerClient client = SecretManagerClient.create(configuration("environment"))) {
             SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.read("s"));
             assertEquals("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are not both set", e.getMessage());

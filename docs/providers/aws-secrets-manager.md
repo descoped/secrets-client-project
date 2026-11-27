@@ -47,20 +47,25 @@ try (SecretManagerClient client = SecretManagerClient.create(Map.of(
 Credentials come from the source `secrets.credentials` names, or else from the first of this chain that applies, in
 the order of the AWS SDKs where that keeps the guarantee:
 
-1. `AWS_ACCESS_KEY_ID` set: the client refuses to start. The JVM holds its environment as `String`s on the heap for
+1. `profile`, when the configuration names a file or a profile (`secrets.credentials-path`, `secrets.aws-profile`),
+   whatever the environment holds, as an explicit profile is used in the AWS SDKs.
+2. `AWS_ACCESS_KEY_ID` set: the client refuses to start. The JVM holds its environment as `String`s on the heap for
    its whole life, so keys there are outside the guarantee whatever the client does. `secrets.credentials=environment`
    uses them anyway (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`), for a platform that offers
    nothing else, such as AWS Lambda. They are never skipped silently, since an application that sets them means them.
-2. `AWS_WEB_IDENTITY_TOKEN_FILE` set: refused; web identity (EKS IRSA) is not supported yet. EKS Pod Identity is.
-3. `profile`: the shared credentials file, when it is configured or `~/.aws/credentials` exists.
-4. `container`: the container credentials endpoint, when it is configured or the platform sets its variables: the
+3. `AWS_WEB_IDENTITY_TOKEN_FILE` set: refused; web identity (EKS IRSA) is not supported yet. EKS Pod Identity is.
+4. `profile`, when the file exists (`AWS_SHARED_CREDENTIALS_FILE`, else `~/.aws/credentials`). An `AWS_PROFILE` left
+   in an image without a file does not stop the chain.
+5. `container`: the container credentials endpoint, when it is configured or the platform sets its variables: the
    ECS task role (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`) and EKS Pod Identity (`AWS_CONTAINER_CREDENTIALS_FULL_URI`
    with `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`). A token in `AWS_CONTAINER_AUTHORIZATION_TOKEN` is refused, for the
    same reason as keys in the environment.
-5. `instance`: EC2 instance metadata, unless `AWS_EC2_METADATA_DISABLED` is `true`.
+6. `instance`: EC2 instance metadata, unless `AWS_EC2_METADATA_DISABLED` is `true`.
 
-Nothing is fetched until the first request, so a missing source is reported then, before anything is sent to Secrets
-Manager. Temporary credentials are fetched again five minutes before they expire.
+A configuration problem (a refusal, an endpoint off the allowed hosts, a source that is chosen but not set up) is
+reported by `create`. Nothing is fetched until the first request, so a source that is missing, unreachable or fails
+is reported then, before anything is sent to Secrets Manager. Temporary credentials are fetched again five minutes
+before they expire. A token or key with a control character, such as a line break, is refused before it is sent.
 
 - **Shared credentials file**, as `aws configure` writes it: `aws_access_key_id`, `aws_secret_access_key` and, for
   temporary keys, `aws_session_token`, in the profile's section. The file is read into guarded memory and parsed

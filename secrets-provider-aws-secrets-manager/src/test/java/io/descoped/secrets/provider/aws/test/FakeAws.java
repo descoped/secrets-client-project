@@ -13,6 +13,9 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -98,7 +101,7 @@ final class FakeAws implements AutoCloseable {
     /** A session token IMDS issues but does not accept, or {@code null} to issue the one it accepts. */
     volatile String issuedInstanceToken;
     /** How long the temporary credentials the container endpoint and IMDS issue are valid. */
-    volatile java.time.Duration credentialsLifetime = java.time.Duration.ofHours(6);
+    volatile Duration credentialsLifetime = Duration.ofHours(6);
     /** Whether the credentials document has an expiration that is not a timestamp. */
     volatile boolean malformedExpiration;
     /** The requests to the container endpoint and IMDS: method, path and the token header they carried. */
@@ -235,8 +238,8 @@ final class FakeAws implements AutoCloseable {
     }
 
     private String credentialsDocument(boolean instance) {
-        String expiration = malformedExpiration ? "soon" : java.time.Instant.now().plus(credentialsLifetime)
-                .truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString();
+        String expiration = malformedExpiration ? "soon" : Instant.now().plus(credentialsLifetime)
+                .truncatedTo(ChronoUnit.SECONDS).toString();
         return "{" + (instance ? "\"Code\":\"Success\",\"Type\":\"AWS-HMAC\"," : "\"RoleArn\":\"arn:aws:iam::123456789012"
                 + ":role/" + ROLE + "\",") + "\"AccessKeyId\":\"" + ACCESS_KEY_ID + "\",\"SecretAccessKey\":"
                 + TestJson.quote(secretAccessKey).replace("/", "\\/") + ",\"Token\":" + TestJson.quote(sessionToken)

@@ -36,7 +36,7 @@ class AwsSecretsManagerCanaryTest {
     private static final String KNOWN_KEY = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
     /** The subject's mode for the default chain, with no source in its configuration. */
     private static final String CHAIN = "CHAIN";
-    private static final String KNOWN_SESSION ="IQoJb3JpZ2luX2VjEJr//////////wEaCmV1LW5vcnRoLTE=";
+    private static final String KNOWN_SESSION = "IQoJb3JpZ2luX2VjEJr//////////wEaCmV1LW5vcnRoLTE=";
     /** Before the canary in a binary value: not UTF-8, and Base64 {@code ////}, so that escaping applies. */
     private static final byte[] NOT_UTF8 = {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF};
 
@@ -155,8 +155,10 @@ class AwsSecretsManagerCanaryTest {
             aws.sessionToken = KNOWN_SESSION;
             aws.containerToken = value;
             aws.put("canary", "00000000-0000-0000-0000-000000000001", value, null);
-            canary.environment(Map.of(
+            // AWS_PROFILE without a credentials file does not stop the chain, as in the AWS SDKs.
+            canary.withoutEnvironment("AWS_").environment(Map.of(
                     "HOME", home.toString(),
+                    "AWS_PROFILE", "left-over",
                     "AWS_CONTAINER_CREDENTIALS_FULL_URI", aws.endpoint() + FakeAws.CONTAINER_PATH,
                     "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", canary.file().toString()))
                     .run(SUBJECT, CHAIN, aws.endpoint()).assertClean();
@@ -178,10 +180,31 @@ class AwsSecretsManagerCanaryTest {
         try (FakeAws aws = new FakeAws()) {
             Map<String, String> environment = new HashMap<>(Map.of("HOME", home.toString(), variable, setting));
             environment.put("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", FakeAws.CONTAINER_PATH);
-            HeapCanary.Run run = canary.environment(environment).run(SUBJECT, CHAIN, aws.endpoint());
+            HeapCanary.Run run = canary.withoutEnvironment("AWS_").environment(environment)
+                    .run(SUBJECT, CHAIN, aws.endpoint());
             assertNotEquals(0, run.exit());
             assertTrue(run.output().contains(message), run.output());
             assertTrue(aws.requests.isEmpty() && aws.credentialRequests.isEmpty(), "nothing was sent");
+        }
+    }
+
+    /**
+     * A credentials file in the configuration is used whatever the environment holds, as an explicit profile is in
+     * the AWS SDKs: keys in the environment do not stop an application that names its file.
+     */
+    @Test
+    void aConfiguredFileWinsOverKeysInTheEnvironment() throws Exception {
+        String before = PROFILE + "aws_secret_access_key = ";
+        HeapCanary canary = HeapCanary.create(dir, before, "\n");
+        String value = Files.readString(canary.file(), StandardCharsets.UTF_8)
+                .substring(before.length(), before.length() + HeapCanary.LENGTH);
+        try (FakeAws aws = new FakeAws()) {
+            aws.secretAccessKey = value;
+            aws.put("canary", "00000000-0000-0000-0000-000000000001", value, null);
+            canary.withoutEnvironment("AWS_").environment(Map.of("HOME", home.toString(),
+                            "AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE", "AWS_SECRET_ACCESS_KEY", KNOWN_KEY))
+                    .run(SUBJECT, Mode.KEY.name(), aws.endpoint()).assertClean();
+            assertEquals(3, aws.requests.size());
         }
     }
 

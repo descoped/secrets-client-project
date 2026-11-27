@@ -32,30 +32,50 @@ final class CredentialsDocument {
     static Credentials parse(SecretMemory memory, Secret body, String source) {
         return body.withSegment(json -> {
             try {
-                Json.Obj document = Json.parse(json) instanceof Json.Obj object ? object : null;
-                Json.Str id = document == null ? null : document.string("AccessKeyId");
-                Json.Str key = document == null ? null : document.string("SecretAccessKey");
-                Json.Str token = document == null ? null : document.string("Token");
-                Json.Str expiration = document == null ? null : document.string("Expiration");
-                if (id == null || key == null || token == null || expiration == null) {
-                    throw new SecretManagerException("The credentials from " + source
-                            + " lack AccessKeyId, SecretAccessKey, Token or Expiration");
-                }
-                Instant expires = Instant.parse(Json.text(json, expiration));
-                String accessKeyId = Json.text(json, id);
-                Secret secretAccessKey = unescaped(memory, json, key);
-                try {
-                    return new Credentials(accessKeyId, secretAccessKey, unescaped(memory, json, token), expires);
-                } catch (RuntimeException e) {
-                    secretAccessKey.close();
-                    throw e;
-                }
+                return parse(memory, json, source);
             } catch (Codec.MalformedException | DateTimeParseException e) {
                 // Not chained: nothing about the keys may leave this method.
                 throw new SecretManagerException("Cannot parse the credentials from " + source + " ("
                         + e.getClass().getSimpleName() + ")");
             }
         });
+    }
+
+    private static Credentials parse(SecretMemory memory, MemorySegment json, String source)
+            throws Codec.MalformedException {
+        if (!(Json.parse(json) instanceof Json.Obj document)) {
+            throw lacking(source);
+        }
+        Json.Str id = document.string("AccessKeyId");
+        Json.Str key = document.string("SecretAccessKey");
+        Json.Str token = document.string("Token");
+        Json.Str expiration = document.string("Expiration");
+        if (id == null || key == null || token == null || expiration == null) {
+            throw lacking(source);
+        }
+        Instant expires = Instant.parse(Json.text(json, expiration));
+        String accessKeyId = Json.text(json, id);
+        Secret secretAccessKey = unescaped(memory, json, key);
+        Secret sessionToken = null;
+        boolean done = false;
+        try {
+            sessionToken = unescaped(memory, json, token);
+            Credentials credentials = new Credentials(accessKeyId, secretAccessKey, sessionToken, expires);
+            done = true;
+            return credentials;
+        } finally {
+            if (!done) {
+                secretAccessKey.close();
+                if (sessionToken != null) {
+                    sessionToken.close();
+                }
+            }
+        }
+    }
+
+    private static SecretManagerException lacking(String source) {
+        return new SecretManagerException("The credentials from " + source
+                + " lack AccessKeyId, SecretAccessKey, Token or Expiration");
     }
 
     private static Secret unescaped(SecretMemory memory, MemorySegment json, Json.Str string)

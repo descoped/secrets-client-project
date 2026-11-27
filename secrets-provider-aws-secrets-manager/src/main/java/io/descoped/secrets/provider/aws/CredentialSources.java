@@ -27,10 +27,12 @@ import static io.descoped.secrets.provider.aws.AwsSecretsManagerClientInitialize
  * the chain that applies, in the order of the AWS SDKs where that keeps the guarantee:
  *
  * <ol>
+ *     <li>the shared credentials file, when the configuration names a file or profile;</li>
  *     <li>{@code AWS_ACCESS_KEY_ID} set: refused, unless {@code secrets.credentials=environment} (the environment is
  *     on the heap); never skipped silently, since the application meant those keys;</li>
  *     <li>{@code AWS_WEB_IDENTITY_TOKEN_FILE} set: refused, web identity is not supported yet;</li>
- *     <li>the shared credentials file, when it is configured or {@code ~/.aws/credentials} exists;</li>
+ *     <li>the shared credentials file, when it exists ({@code AWS_SHARED_CREDENTIALS_FILE}, else
+ *     {@code ~/.aws/credentials});</li>
  *     <li>the container credentials endpoint, when it is configured or the platform sets its variables (ECS, EKS Pod
  *     Identity);</li>
  *     <li>EC2 instance metadata (IMDSv2), unless {@code AWS_EC2_METADATA_DISABLED} is {@code true}.</li>
@@ -47,6 +49,8 @@ final class CredentialSources {
     private static final Set<String> INSTANCE_HOSTS = Set.of("169.254.169.254", "fd00:ec2::254");
     @SuppressWarnings("java:S1313")
     private static final String INSTANCE_ENDPOINT = "http://169.254.169.254";
+
+    private static final String DEFAULT = "default";
 
     /** A source. */
     enum Kind {
@@ -84,19 +88,27 @@ final class CredentialSources {
     }
 
     static Choice choose(Map<String, String> configuration, UnaryOperator<String> environment) {
-        String pinned = configuration.getOrDefault(CREDENTIALS_KEY, "default");
+        String pinned = configuration.getOrDefault(CREDENTIALS_KEY, DEFAULT);
         return switch (pinned) {
             case "profile" -> profile(configuration, environment);
             case "container" -> container(configuration, environment, true);
             case "instance" -> instance(configuration, environment);
             case "environment" -> new Choice(Kind.ENVIRONMENT, null, null, null, null);
-            case "default" -> chain(configuration, environment);
+            case DEFAULT -> chain(configuration, environment);
             default -> throw new IllegalArgumentException("Invalid '" + CREDENTIALS_KEY + "': " + pinned
                     + " (default, profile, container, instance or environment)");
         };
     }
 
+    /**
+     * The chain. A file or profile in the configuration chooses the profile, as an explicit profile provider does in
+     * the AWS SDKs, whatever the environment holds; one in the environment only if the file exists, so that a stray
+     * {@code AWS_PROFILE} in an image does not hide the platform's credentials.
+     */
     private static Choice chain(Map<String, String> configuration, UnaryOperator<String> environment) {
+        if (isSet(configuration.get(CREDENTIALS_PATH_KEY)) || isSet(configuration.get(PROFILE_KEY))) {
+            return profile(configuration, environment);
+        }
         if (isSet(environment.apply(EnvironmentCredentials.ACCESS_KEY_ID))) {
             throw new IllegalArgumentException(EnvironmentCredentials.ACCESS_KEY_ID + " is set, but keys in the"
                     + " environment are on the Java heap: set '" + CREDENTIALS_KEY + "=environment' to use them anyway,"
@@ -106,10 +118,9 @@ final class CredentialSources {
             throw new IllegalArgumentException("AWS_WEB_IDENTITY_TOKEN_FILE is set, but web identity credentials (EKS"
                     + " IRSA) are not supported yet: use EKS Pod Identity, or set '" + CREDENTIALS_KEY + "'");
         }
-        if (isSet(configuration.get(CREDENTIALS_PATH_KEY)) || isSet(configuration.get(PROFILE_KEY))
-                || isSet(environment.apply("AWS_SHARED_CREDENTIALS_FILE")) || isSet(environment.apply("AWS_PROFILE"))
-                || Files.exists(defaultCredentialsFile(environment))) {
-            return profile(configuration, environment);
+        Choice profile = profile(configuration, environment);
+        if (Files.exists(profile.file())) {
+            return profile;
         }
         Choice container = container(configuration, environment, false);
         if (container != null) {
@@ -126,7 +137,7 @@ final class CredentialSources {
         String configured = firstOf(configuration.get(CREDENTIALS_PATH_KEY),
                 environment.apply("AWS_SHARED_CREDENTIALS_FILE"));
         Path file = configured != null ? Path.of(configured) : defaultCredentialsFile(environment);
-        String profile = firstOf(configuration.get(PROFILE_KEY), environment.apply("AWS_PROFILE"), "default");
+        String profile = firstOf(configuration.get(PROFILE_KEY), environment.apply("AWS_PROFILE"), DEFAULT);
         return new Choice(Kind.PROFILE, file, profile, null, null);
     }
 
@@ -135,8 +146,11 @@ final class CredentialSources {
                                     boolean required) {
         String full = firstOf(configuration.get(CONTAINER_URI_KEY),
                 environment.apply("AWS_CONTAINER_CREDENTIALS_FULL_URI"));
+        String value = full;
         String relative = environment.apply("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI");
-        String value = full != null ? full : isSet(relative) ? "http://" + ECS_HOST + relative : null;
+        if (value == null && isSet(relative)) {
+            value = "http://" + ECS_HOST + relative;
+        }
         if (value == null) {
             if (required) {
                 throw new IllegalArgumentException("No container credentials endpoint: set '" + CONTAINER_URI_KEY

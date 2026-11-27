@@ -20,7 +20,10 @@ final class InstanceMetadataCredentials implements CredentialsProvider.Source {
 
     static final String SOURCE = "EC2 instance metadata";
 
+    /** IMDS's own paths, part of its protocol; only the endpoint is configurable. */
+    @SuppressWarnings("java:S1075")
     private static final String TOKEN_PATH = "/latest/api/token";
+    @SuppressWarnings("java:S1075")
     private static final String ROLES_PATH = "/latest/meta-data/iam/security-credentials/";
     private static final String TOKEN_HEADER = "X-aws-ec2-metadata-token";
     /** Six hours, the most IMDS allows; a token is used for one fetch only. */
