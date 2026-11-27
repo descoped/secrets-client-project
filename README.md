@@ -46,7 +46,7 @@ secrets-client-api/                        the API and the provider service
 secrets-provider-safe-configuration/       provider: a local key=value file, for development and tests
 secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST, no dependency but the API)
 secrets-provider-mounted/                  provider: secrets the platform mounts as files, read-only
-secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API with SigV4, no dependency but the API)
+secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API, SigV4; no dependency but the API)
 secrets-client-bom/                        BOM of the modules above
 secrets-test-support/                      test support: the canary heap-dump harness (never published)
 src/it/consumer/                           JPMS smoke test: an application using every provider
