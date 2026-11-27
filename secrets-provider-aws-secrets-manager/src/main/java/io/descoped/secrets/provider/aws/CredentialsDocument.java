@@ -56,21 +56,14 @@ final class CredentialsDocument {
         Instant expires = Instant.parse(Json.text(json, expiration));
         String accessKeyId = Json.text(json, id);
         Secret secretAccessKey = unescaped(memory, json, key);
-        Secret sessionToken = null;
-        boolean done = false;
+        Secret sessionToken;
         try {
             sessionToken = unescaped(memory, json, token);
-            Credentials credentials = new Credentials(accessKeyId, secretAccessKey, sessionToken, expires);
-            done = true;
-            return credentials;
-        } finally {
-            if (!done) {
-                secretAccessKey.close();
-                if (sessionToken != null) {
-                    sessionToken.close();
-                }
-            }
+        } catch (Codec.MalformedException | RuntimeException e) {
+            secretAccessKey.close();
+            throw e;
         }
+        return new Credentials(accessKeyId, secretAccessKey, sessionToken, expires);
     }
 
     private static SecretManagerException lacking(String source) {
