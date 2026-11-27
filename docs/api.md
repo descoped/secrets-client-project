@@ -1,3 +1,9 @@
+---
+title: The API
+description: SecretManagerClient, its configuration, the contract every provider follows, and guarded memory with SecretMemory and Secret.
+order: 3
+---
+
 # The API
 
 `secrets-client-api` is what every application compiles against: `SecretManagerClient`, its exceptions, and the

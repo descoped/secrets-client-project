@@ -1,3 +1,9 @@
+---
+title: AWS Secrets Manager
+description: The aws-secrets-manager provider reads and writes AWS Secrets Manager with SigV4 signing and TLS on guarded memory, with credentials from ECS, EKS, EC2 or a profile.
+order: 2
+---
+
 # Provider: aws-secrets-manager
 
 [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/) through its JSON API, signed with Signature Version 4,
@@ -66,7 +72,7 @@ the order of the AWS SDKs where that keeps the guarantee:
 A configuration problem (a refusal, an endpoint off the allowed hosts, a source that is chosen but not set up) is
 reported by `create`. Nothing is fetched until the first request, so a source that is missing, unreachable or fails
 is reported then, before anything is sent to Secrets Manager. Temporary credentials are fetched again five minutes
-before they expire. A token or key with a control character, such as a line break, is refused before it is sent.
+before they expire. A token with a control character, such as a line break, is refused before it is sent.
 
 - **Shared credentials file**, as `aws configure` writes it: `aws_access_key_id`, `aws_secret_access_key` and, for
   temporary keys, `aws_session_token`, in the profile's section. The file is read into guarded memory and parsed
@@ -88,8 +94,9 @@ before they expire. A token or key with a control character, such as a line brea
   like a version ID, and is read as one.
 - `addVersion(name, value)` adds a version as `AWSCURRENT`, the previous one becoming `AWSPREVIOUS`, and returns its
   version ID. If the secret does not exist, it is created with the value (with `secrets.kms-key-id` and
-  `secrets.replica-regions`). Each request carries a new client request token, so a retried request never adds a
-  second version.
+  `secrets.replica-regions`). Each request carries a client request token of its own, which becomes the version ID.
+  The client never retries a request; if `addVersion` fails with a timeout, the version may or may not have been
+  added, and calling `addVersion` again adds another one.
 - A value that is valid UTF-8 is written as `SecretString`, as other AWS tools expect, and any other value as
   `SecretBinary`. Both are read back as the same bytes.
 - Names are 1 to 512 letters, digits and `/_+=.@-`, or a secret's ARN. Reading a name or version outside that rule is a

@@ -43,9 +43,9 @@ One Maven reactor; every module shares the version of the root POM.
 ```
 secrets-client-api/                        the API and the provider service
 secrets-provider-safe-configuration/       provider: a local key=value file, for development and tests
-secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST, no dependencies)
+secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST, no dependency but the API)
 secrets-provider-mounted/                  provider: secrets the platform mounts as files, read-only
-secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API with SigV4, no dependencies)
+secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API with SigV4, no dependency but the API)
 secrets-client-bom/                        BOM of the modules above
 secrets-test-support/                      test support: the canary heap-dump harness (never published)
 src/it/consumer/                           JPMS smoke test: an application using every provider
@@ -73,7 +73,8 @@ Without just, the same with Maven: `./mvnw verify`, `./mvnw verify javadoc:javad
 - The Google provider's tests run against `FakeGoogle`, and the AWS provider's against `FakeAws`, local fakes of the
   APIs and of the credential endpoints. The live tests (`just live-google`, `just live-aws`) run against real
   accounts only when their variables are set, never in CI.
-- Pull requests run CI (build, tests, Javadoc, smoke test, SonarCloud) and an automated review. Releases are
+- Pull requests run CI (build, tests, Javadoc, smoke test) and an automated review; SonarCloud analyses pushes and
+  pull requests from this repository, without gating the build. Releases are
   published to Maven Central by hand ([releasing](docs/releasing.md)). SNAPSHOTs of `master`, and of a branch when run by hand
   (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/`, never to Maven Central (see [getting started](docs/getting-started.md)).
 

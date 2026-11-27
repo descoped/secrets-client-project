@@ -62,7 +62,7 @@ smoke: _jdk
     src/it/consumer/run.sh
 
 # Tests on Linux in Docker, where memfd_secret is in use, with the pinned Maven. Usage: just linux [modules] [tests]
-linux modules="secrets-client-api,secrets-test-support,secrets-provider-safe-configuration,secrets-provider-mounted,secrets-provider-google-secret-manager" tests="":
+linux modules="secrets-client-api,secrets-test-support,secrets-provider-safe-configuration,secrets-provider-mounted,secrets-provider-google-secret-manager,secrets-provider-aws-secrets-manager" tests="":
     # The wrapper needs unzip: without it, it downloads the .tar.gz and checks it against the .zip's checksum.
     docker run --rm -v "$PWD":/src:ro -v secrets-client-m2:/root/.m2 maven:3-eclipse-temurin-25 bash -c \
         'set -o pipefail; (apt-get update -qq && apt-get install -y -qq unzip) >/dev/null 2>&1; \

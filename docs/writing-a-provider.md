@@ -1,3 +1,9 @@
+---
+title: Writing a provider
+description: Add a secrets backend of your own to the secrets client, behind the same API and contract.
+order: 10
+---
+
 # Writing a provider
 
 A provider adds a backend to `SecretManagerClient.create`. It is a named module that depends on `secrets-client-api`

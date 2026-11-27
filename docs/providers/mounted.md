@@ -1,3 +1,9 @@
+---
+title: Mounted files
+description: The mounted provider reads secrets the platform mounts as files (Cloud Run, Kubernetes, the Secrets Store CSI driver) into guarded memory, with no credential in the process.
+order: 3
+---
+
 # Provider: mounted
 
 Secrets that the platform mounts as files, read-only. The process holds no credential and has no network code for

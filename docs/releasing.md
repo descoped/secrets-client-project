@@ -1,3 +1,9 @@
+---
+title: Releasing
+description: How a version of the secrets client is released to Maven Central, for maintainers.
+order: 13
+---
+
 # Releasing
 
 Releases are made **only by the owner, or on his explicit word**, and go only to Maven Central. A SNAPSHOT never goes

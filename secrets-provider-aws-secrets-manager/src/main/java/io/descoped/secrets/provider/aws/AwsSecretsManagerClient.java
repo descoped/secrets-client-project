@@ -120,7 +120,8 @@ final class AwsSecretsManagerClient implements SecretManagerClient {
      * Adds a version as the current one, and creates the secret first if it does not exist (with the KMS key and
      * replica regions from the configuration). Returns the new version ID. The value is sent as
      * {@code SecretString} when it is valid UTF-8, as other AWS tools expect, else as {@code SecretBinary}. Each
-     * request carries a new client request token, so a retried request never adds a second version.
+     * request carries a client request token of its own, which becomes the version ID. No request is retried: after a
+     * timeout the version may or may not have been added, and calling this again adds another one.
      */
     @Override
     public String addVersion(String secretName, Secret secretValue) {
