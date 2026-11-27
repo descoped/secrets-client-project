@@ -20,8 +20,8 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
   `read`.
 - Google Secret Manager on guarded memory, with its own HTTP/1.1 client (`SocketChannel`, `SSLEngine`), JSON reader
   and Base64: the provider's own code keeps values, the access token and the refresh token off the Java heap (proven
-  over plain HTTP by a canary test). Over TLS the JDK's `SSLEngine` makes short-lived heap copies while it encrypts
-  and decrypts; a canary test records that boundary, and the `mounted` provider is the path with no network code.
+  over plain HTTP by a canary test). Over TLS the JDK's `SSLEngine` makes heap copies while it encrypts and
+  decrypts, which the garbage collector reclaims but does not wipe; a canary test records that boundary, and the `mounted` provider is the path with no network code.
   Credentials: an `authorized_user` file (`gcloud auth application-default
   login`), `GOOGLE_APPLICATION_CREDENTIALS`, gcloud's file, or the metadata server; `secrets.credentials=metadata`
   for the metadata server only. New keys `secrets.credentials`, `secrets.credentials-path`, `secrets.token-endpoint`,

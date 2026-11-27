@@ -79,7 +79,9 @@ class GoogleSecretManagerCanaryTest {
      * The known boundary of the guarantee: every exchange over TLS (the token grant, the read and the write) leaves
      * copies on the heap, made inside the JDK's TLS and cipher code from the direct buffers it is given. The
      * provider's own code is clean (the http tests). This asserts the leak so that a JDK that stops copying is
-     * noticed: then change it to {@code assertClean}, rename it, and update the provider's documentation.
+     * noticed. The copies are garbage, so a change of GC or heap size could also make them disappear before the dump:
+     * if this fails, first check with {@code just repeat} that it fails every time and that the copies are not made
+     * any more. Only then change it to {@code assertClean}, rename it, and update the provider's documentation.
      */
     @Test
     void theJdksTlsLeavesCopiesOnTheHeap() throws Exception {

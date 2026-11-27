@@ -47,7 +47,8 @@ change to the API or to a provider's documented behaviour needs a new major vers
   `read` in dynamic-configuration (removed in phase 6) copies `readBytes` into guarded memory, the default
   `addVersion(String, Secret)` hands a wiped heap copy to `addVersion(String, byte[])`. The JDK's TLS
   (`SSLEngine`) is the documented boundary: it copies plaintext through heap arrays (phase 5's canary test asserts
-  the leak), and native TLS is deferred by the owner's decision (dossier, `future-work.md`).
+  the leak), and native TLS (OpenSSL through FFM) is deferred by the owner's decision; its plan is in the owner's private
+  notes, not in this repository.
 - **One contract for every provider.** A missing secret, a closed client and a write the provider cannot do are
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and

@@ -100,8 +100,9 @@ and the value decoded from Base64 straight into the `Secret` that `read` returns
 TLS is the JDK's `SSLEngine` (TLS 1.3 or 1.2, the default trust store, host name verification and SNI), and that is
 where the guarantee ends. The provider hands `SSLEngine` only direct buffers, but the JDK's TLS and cipher code copies
 the plaintext through heap arrays while it encrypts and decrypts. So the access token, the refresh token and the
-values do appear on the heap over TLS: short-lived copies the provider does not keep, which the garbage collector
-reclaims, but which a heap dump taken at the wrong moment can hold. The canary tests show both sides: over plain HTTP
+values do appear on the heap over TLS. The provider does not keep these copies, and the garbage collector reclaims
+them, but it does not wipe them: the bytes stay in memory until it is reused, so a heap dump, a core dump or swap
+can hold them. The canary tests show both sides: over plain HTTP
 the heap is clean, and over TLS it is not.
 
 Where a secret must never reach the heap, for example a key used for cryptography in native memory, read it
