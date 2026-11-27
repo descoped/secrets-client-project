@@ -53,7 +53,8 @@ the order of the AWS SDKs where that keeps the guarantee:
    its whole life, so keys there are outside the guarantee whatever the client does. `secrets.credentials=environment`
    uses them anyway (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`), for a platform that offers
    nothing else, such as AWS Lambda. They are never skipped silently, since an application that sets them means them.
-3. `AWS_WEB_IDENTITY_TOKEN_FILE` set: refused; web identity (EKS IRSA) is not supported yet. EKS Pod Identity is.
+3. `AWS_WEB_IDENTITY_TOKEN_FILE` set: refused; web identity (EKS IRSA) is not supported yet
+   ([roadmap](../roadmap.md)). EKS Pod Identity is.
 4. `profile`, when the file exists (`AWS_SHARED_CREDENTIALS_FILE`, else `~/.aws/credentials`). An `AWS_PROFILE` left
    in an image without a file does not stop the chain.
 5. `container`: the container credentials endpoint, when it is configured or the platform sets its variables: the
