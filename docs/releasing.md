@@ -32,7 +32,8 @@ Releases up to 3.0.0 were tagged without the `v` (`3.0.0`), and the modules' old
   Google Secret Manager (`just live-google`, and on Cloud Run with the metadata server) and AWS Secrets Manager
   (`just live-aws`, and on ECS and EC2 with role credentials). CI cannot make these.
 - `CHANGELOG.md` has a section `## [<version>] - <date>`, with the compare link at the bottom, merged in a pull
-  request. The GitHub release takes its notes from it.
+  request. The GitHub release takes its notes from it. The links use the tags as they are: 4.0.0's is
+  `compare/3.0.0...v4.0.0` (3.0.0 has no `v`), and from then on `compare/v4.0.0...v4.0.1` and so on.
 - `~/.m2/settings.xml` has the server `central` with the Central Portal token and
   `<repositoryOrigins>https://central.sonatype.com</repositoryOrigins>`. Maven 3.10 only sends a server's credentials
   to the hosts it knows for that id.
@@ -59,7 +60,8 @@ both commits and the tag. The tag push runs CI on the tag.
 signed with the GPG key (gpg-agent asks for the passphrase) and the bundle is uploaded to the Central Portal. It is
 not published: `autoPublish=false`, and the upload waits until the Portal has validated it. The log ends with the
 deployment id and `has been validated`. `-P secrets` is not a profile of this POM: it makes the owner's Maven setup
-load the Portal token for this one run.
+load the Portal token for this one run, so Maven's warning that the profile `secrets` could not be activated is
+expected.
 
 ### 2. Publish on Central
 
