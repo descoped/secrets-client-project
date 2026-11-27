@@ -15,14 +15,13 @@ true when behaviour changes.
 | `secrets-client-bom` | n/a | BOM of the modules below |
 | `secrets-client-api` | `io.descoped.secrets.api` | `SecretManagerClient`, `SecretManagerClientInitializer` (the provider service, on `io.descoped.spi:service-provider-api`) |
 | `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | local `key=value` file, for development and tests; read, parsed, held and written in guarded memory |
-| `secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | read-only, on `io.descoped.config:dynamic-configuration` 3.x, for tests and migration |
 | `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | Google Secret Manager REST API on guarded memory: its own HTTP/1.1 client (`SSLEngine`), JSON reader and Base64; tokens from an `authorized_user` file or the metadata server; no dependency but the API |
 | `secrets-provider-mounted` | `io.descoped.secrets.provider.mounted` | read-only: secrets the platform mounts as files (Cloud Run, Kubernetes, Secrets Store CSI), read into guarded memory on every read; no network, no credential |
 
 Until 2026-11 every module was a repository of its own; their histories were imported here with `git filter-repo`
 (old tags prefixed with the module name, e.g. `secrets-client-api/2.0.3`). 3.0.0 (2026-11-17) is the first release
 from this repository, with new module and package names, a revised API and revised providers; `CHANGELOG.md` and
-`docs/migrating-from-2.x.md` describe the changes. From 3.0.0 on, versions follow semantic versioning: a breaking
+`docs/migrating.md` describe the changes. From 3.0.0 on, versions follow semantic versioning: a breaking
 change to the API or to a provider's documented behaviour needs a new major version.
 
 ## Invariants (never violate)
@@ -37,18 +36,15 @@ change to the API or to a provider's documented behaviour needs a new major vers
   transitive` it. Providers are registered both with `provides` in `module-info.java` and in `META-INF/services`, so
   they work on the module path and the class path.
 - **Secrets stay secret.** Secret values are never logged, never put in exception messages, `toString` or test
-  output. Byte and char arrays handed to or returned by a client are copies; the client wipes its own copies when it
-  no longer needs them and on `close()`.
-- **No secret on the Java heap (4.0, being built).** Library code keeps secret values, and credentials that grant
+  output. A client takes and returns values only as a `Secret`; `read` returns a new one the caller owns, the client
+  copies the one `addVersion` is given, and it wipes its own copies when it no longer needs them and on `close()`.
+- **No secret on the Java heap (4.0).** Library code keeps secret values, and credentials that grant
   access to secrets (access and refresh tokens), only in guarded native memory (FFM, `java.lang.foreign`): never in a
   heap array, a `String` or a heap `ByteBuffer`, except the hand-over copy a caller asks for, wiped when its callback
   returns. No runtime dependency that holds them on the heap. A canary heap-dump test proves each read and write path.
-  Code from 3.x does not meet this yet; new code must. Accepted interim exceptions, until the plan removes them:
-  `read` in dynamic-configuration (removed in phase 6) copies `readBytes` into guarded memory, the default
-  `addVersion(String, Secret)` hands a wiped heap copy to `addVersion(String, byte[])`. The JDK's TLS
-  (`SSLEngine`) is the documented boundary: it copies plaintext through heap arrays (phase 5's canary test asserts
-  the leak), and native TLS (OpenSSL through FFM) is deferred by the owner's decision; its plan is in the owner's private
-  notes, not in this repository.
+  The one accepted exception is the JDK's TLS (`SSLEngine`), the documented boundary: it copies plaintext through
+  heap arrays (phase 5's canary test asserts the leak), and native TLS (OpenSSL through FFM) is deferred by the
+  owner's decision; its plan is in the owner's private notes, not in this repository.
 - **One contract for every provider.** A missing secret, a closed client and a write the provider cannot do are
   reported the same way by every provider.
 - **Always the latest stable version** of every library, plugin and action. Pre-releases only on request. Old and

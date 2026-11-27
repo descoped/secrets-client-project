@@ -16,8 +16,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - `SecretManagerClient.read(name)`/`read(name, version)` return a `Secret`, and `addVersion(name, Secret)` writes
   one. Closing the client closes the secrets it returned.
 - safe-configuration reads, parses, holds and writes in guarded memory: no value is on the Java heap unless the caller
-  asks for a heap copy, proven by a canary heap-dump test. dynamic-configuration copies into guarded memory for
-  `read`.
+  makes a heap copy, proven by a canary heap-dump test.
 - Google Secret Manager on guarded memory, with its own HTTP/1.1 client (`SocketChannel`, `SSLEngine`), JSON reader
   and Base64: the provider's own code keeps values, the access token and the refresh token off the Java heap (proven
   over plain HTTP by a canary test). Over TLS the JDK's `SSLEngine` makes heap copies while it encrypts and
@@ -40,10 +39,12 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 ### Changed
 
 - Java 25 or later (was 17).
-- `SecretManagerClient.read(String, String)` is a new abstract method: a provider written for 3.x must implement it.
+- `SecretManagerClient` reads and writes only `Secret`s: `read(name)`, `read(name, version)` and
+  `addVersion(name, Secret)` are what is left besides `close()` and `create`. A provider implements `read(String,
+  String)` and `addVersion(String, Secret)`. See [Migrating from 3.x](docs/migrating.md#migrating-from-3x-to-40).
 - safe-configuration needs native access: `SecretManagerClient.create` fails without
   `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path) unless
-  `secrets.memory.guard=off`. `read` needs it with every provider.
+  `secrets.memory.guard=off`. Every provider needs it.
 - safe-configuration is for local development and tests, not for production.
 - Google Secret Manager: service-account keys are refused, and `secrets.service-account-key-path` is an error (signing
   with a key would put it on the Java heap); use the metadata server, or an `authorized_user` file for development.
@@ -54,13 +55,17 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ### Removed
 
+- `readBytes`, `readChars`, `readString`, and `addVersion` with a `byte[]`, `char[]` or `String`: they put values on the
+  Java heap. Use `read` with `Secret.withBytes`/`withChars`, and `SecretMemory.fromBytes`/`fromChars` to write.
+- The dynamic-configuration provider (`secrets-provider-dynamic-configuration`): it held values as strings, which
+  cannot be kept off the heap. Use safe-configuration for a local file, or `mounted` for a directory of secret files.
 - google-auth (with google-http-client, Guava, Gson) and Jackson from the Google provider: it depends on the API
   module only.
 
 ## [3.0.0] - 2026-11-17
 
 A breaking release: the four module repositories are now one, and every module is revised. The Maven coordinates
-are unchanged. See [Migrating from 2.x](docs/migrating-from-2.x.md).
+are unchanged. See [Migrating from 2.x](docs/migrating.md).
 
 ### Changed
 

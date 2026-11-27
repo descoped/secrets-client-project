@@ -27,7 +27,6 @@ whole map. Each provider documents the other keys it reads:
 Provider name | Module
 ---|---
 `safe-configuration` | [secrets-provider-safe-configuration](providers/safe-configuration.md)
-`dynamic-configuration` | [secrets-provider-dynamic-configuration](providers/dynamic-configuration.md)
 `google-secret-manager` | [secrets-provider-google-secret-manager](providers/google-secret-manager.md)
 `mounted` | [secrets-provider-mounted](providers/mounted.md)
 
@@ -54,7 +53,7 @@ keys.forEach((variable, key) -> {
 
 Exception | When
 ---|---
-`IllegalArgumentException` | `secrets.provider` is missing or blank, a key the provider requires is missing, or a value is invalid (for example a malformed project id, an endpoint that is not https, a timeout that is not positive, or no source at all for dynamic-configuration)
+`IllegalArgumentException` | `secrets.provider` is missing or blank, a key the provider requires is missing, or a value is invalid (for example a malformed project id, an endpoint that is not https, or a timeout that is not positive)
 `io.descoped.service.provider.api.ProviderException` | no provider, or more than one, has that name
 `SecretManagerException` | the provider cannot start (for example its file cannot be read)
 `NullPointerException` | the map, or a key or value in it, is `null`
@@ -65,19 +64,8 @@ Exception | When
 public interface SecretManagerClient extends AutoCloseable {
 
     Secret read(String secretName, String secretVersion);       // into guarded memory; null version = latest
-    Secret read(String secretName);
-    String addVersion(String secretName, Secret secretValue);   // from guarded memory
-
-    byte[] readBytes(String secretName, String secretVersion);  // null version = latest
-    byte[] readBytes(String secretName);                        // latest
-    char[] readChars(String secretName, String secretVersion);  // UTF-8
-    char[] readChars(String secretName);
-    String readString(String secretName, String secretVersion);
-    String readString(String secretName);
-
-    String addVersion(String secretName, byte[] secretValue);   // returns the new version id
-    String addVersion(String secretName, char[] secretValue);   // encoded as UTF-8
-    String addVersion(String secretName, String secretValue);
+    Secret read(String secretName);                             // latest
+    String addVersion(String secretName, Secret secretValue);   // from guarded memory; returns the new version id
 
     void close();
 
@@ -88,6 +76,16 @@ public interface SecretManagerClient extends AutoCloseable {
 What a version id looks like depends on the provider: the file-based providers have only `latest`; Google Secret
 Manager has `latest` and version numbers.
 
+Values go in and out only as a `Secret`. To write a value the application holds as characters or bytes, copy it into
+guarded memory first; `fromChars` and `fromBytes` wipe the array they are given:
+
+```java
+try (SecretMemory memory = SecretMemory.create(Map.of());
+     Secret value = memory.fromChars(password)) {     // password is wiped
+    client.addVersion("db.password", value);
+}
+```
+
 ## The contract
 
 Every provider behaves the same way, so an application can switch providers without changing its error handling:
@@ -95,7 +93,7 @@ Every provider behaves the same way, so an application can switch providers with
 Situation | Result
 ---|---
 The secret or the version does not exist | `SecretNotFoundException` (a `SecretManagerException`), with `secretName()` and `secretVersion()`
-Any other failure: I/O, permissions, a remote error, a value that is not valid UTF-8 for `readChars` | `SecretManagerException`
+Any other failure: I/O, permissions, a remote error | `SecretManagerException`
 The provider cannot write (a read-only provider) | `UnsupportedOperationException` from `addVersion`
 Any method after `close()`, except `close()` | `IllegalStateException`
 A `null` name or value | `NullPointerException`
@@ -103,9 +101,6 @@ A `null` name or value | `NullPointerException`
 - Exception messages name the secret, never its value, and neither do `toString()` or the cause chain.
 - `read` returns a new `Secret` that the caller owns and closes; closing the client closes it too. The client keeps
   no reference to it, nor to a `Secret` passed to `addVersion`, which stays the caller's to close.
-- `readBytes` and `readChars` return a new array that the caller owns. The client keeps no reference to it, nor to an
-  array passed to `addVersion`, so the caller can and should wipe both when done: `Arrays.fill(bytes, (byte) 0)`,
-  `Arrays.fill(chars, '\0')`.
 - `close()` is idempotent and wipes what the client holds in memory. A call already running when `close()` is called
   either completes normally or throws `IllegalStateException`; it never fails in any other way or returns a partial
   value.
@@ -113,26 +108,20 @@ A `null` name or value | `NullPointerException`
 
 ## Keeping secrets out of memory
 
-A Java `String` is immutable: it stays in the heap until the garbage collector reclaims it, and it cannot be wiped. So:
+A Java `String` is immutable: it stays in the heap until the garbage collector reclaims it, and it cannot be wiped.
+That is why the client hands values over only as a `Secret`, in guarded memory (see below):
 
-- For passwords and keys, use `read`: the value stays in guarded memory (see below) until it is handed over with
-  `withSegment`, or with `withBytes`/`withChars`, whose heap copy is wiped when the callback returns. A provider that
-  reads files (safe-configuration, mounted) never puts the value on the Java heap on the way, and neither does
-  safe-configuration's `addVersion(String, Secret)`. Google Secret Manager's own code keeps it off the heap too, but
-  the JDK's TLS makes heap copies while it decrypts and encrypts, which are reclaimed but not wiped ([details](providers/google-secret-manager.md#memory-and-tls)).
-  dynamic-configuration holds its values as strings anyway.
-- Otherwise use `readChars` or `readBytes`, and wipe the array in a `finally` block as soon as it has been used.
-- `readChars` decodes UTF-8 into a fresh array; the intermediate bytes and buffers are wiped on every path, including
-  errors. Invalid UTF-8 is an error, never replaced with `?`.
-- `addVersion(String, char[])` encodes strictly to UTF-8 (an unpaired surrogate is an error) and wipes its
-  intermediate bytes.
-- `readString` and `addVersion(String, String)` are conveniences for values that are not sensitive or that end up in a
-  `String` anyway, for example a value passed to a library that only accepts strings.
+- Use the value inside `withSegment`, or with `withBytes`/`withChars`, whose heap copy is wiped when the callback
+  returns. `withChars` decodes strict UTF-8: invalid UTF-8 is an error, never replaced with `?`.
+- A provider that reads files (safe-configuration, mounted) never puts the value on the Java heap on the way, and
+  neither does safe-configuration's `addVersion`. Google Secret Manager's own code keeps it off the heap too, but the
+  JDK's TLS makes heap copies while it decrypts and encrypts, which are reclaimed but not wiped
+  ([details](providers/google-secret-manager.md#memory-and-tls)).
+- A value that has to end up in a `String` (a library that only accepts strings) can be made one inside the callback:
+  `secret.withChars(String::new)`. The `String` is then on the heap for as long as it lives, outside what this
+  library can wipe.
 
 ## Guarded memory: `SecretMemory` and `Secret`
-
-New in 4.0 and still being built: `read` returns `Secret`s, and safe-configuration holds every value in guarded
-memory. When every provider does, the array and string methods above will go.
 
 `SecretMemory` holds secret values off the Java heap, in memory the garbage collector never sees, moves or copies, and
 that is not in heap dumps. A `Secret` is one value in it.

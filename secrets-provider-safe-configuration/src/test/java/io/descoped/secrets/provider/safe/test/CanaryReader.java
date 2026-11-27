@@ -5,6 +5,7 @@ import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.test.support.HeapDump;
 
 import java.io.IOException;
+import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,8 +22,8 @@ import java.util.Map;
  *     <li>{@code write}: rewrite the canary file through {@code addVersion} of another key (which copies the canary's
  *     line), add the canary to a second file through {@code addVersion(name, Secret)}, and read it back from there
  *     with a new client.</li>
- *     <li>{@code read-bytes}: {@code readBytes}, whose array is the caller's and is kept: the dump must hold it. This
- *     proves the test sees a copy that this path makes.</li>
+ *     <li>{@code heap-copy}: {@code read}, then a heap copy that the caller makes and keeps: the dump must hold it.
+ *     This proves the test sees a copy that this path makes.</li>
  * </ul>
  */
 public final class CanaryReader {
@@ -56,7 +57,7 @@ public final class CanaryReader {
                 Path copy = file.resolveSibling("copy.properties");
                 Files.writeString(copy, "# a copy\n", StandardCharsets.UTF_8);
                 try (SecretManagerClient source = open(file); SecretManagerClient target = open(copy)) {
-                    source.addVersion("other", "not a secret");
+                    Values.add(source, "other", "not a secret");
                     try (Secret secret = source.read(KEY)) {
                         target.addVersion(KEY, secret);
                     }
@@ -66,10 +67,10 @@ public final class CanaryReader {
                 }
                 HeapDump.dump(dump);
             }
-            case "read-bytes" -> {
+            case "heap-copy" -> {
                 try (SecretManagerClient client = open(file); Secret secret = client.read(KEY)) {
                     checksum(secret);
-                    kept = client.readBytes(KEY);
+                    kept = secret.withSegment(segment -> segment.toArray(ValueLayout.JAVA_BYTE));
                 }
                 HeapDump.dump(dump);
             }

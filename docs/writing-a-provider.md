@@ -5,11 +5,12 @@ A provider adds a backend to `SecretManagerClient.create`. It is a named module 
 
 A provider is two classes in a named module:
 
-1. A `SecretManagerClient` implementation. Implement `readBytes(String, String)`, `addVersion(String, byte[])` and
-   `close()`; the other methods are defaults built on these. Follow [the contract](api.md#the-contract) exactly; the
-   default methods rely on it. In particular, `close()` may run while other threads are inside a call: read the
-   client's state once per call (into a local, or under a lock) so such a call finishes or throws
-   `IllegalStateException`, never a `NullPointerException`.
+1. A `SecretManagerClient` implementation. Implement `read(String, String)`, `addVersion(String, Secret)` and
+   `close()`; `read(String)` is a default built on the first. Follow [the contract](api.md#the-contract) exactly.
+   Hold values in a `SecretMemory` of the client's own, return a new `Secret` from `read` (closed by the client's
+   `close()` too), and copy the value out of the caller's `Secret` in `addVersion`. In particular, `close()` may run
+   while other threads are inside a call: read the client's state once per call (into a local, or under a lock) so
+   such a call finishes or throws `IllegalStateException`, never a `NullPointerException`.
 2. A `SecretManagerClientInitializer`, with a public no-argument constructor, annotated with
    `@ProviderName("my-provider")`:
 

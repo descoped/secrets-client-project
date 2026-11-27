@@ -47,7 +47,7 @@ api.token = abc def
 
 This is **not** the `java.util.Properties` format: `\`, `:` and `!` have no special meaning, and non-ASCII characters
 are written as UTF-8, not `\uXXXX`. Files written by 2.x need converting; see
-[Migrating from 2.x](../migrating-from-2.x.md).
+[Migrating from 2.x](../migrating.md).
 
 ## Reading
 
@@ -56,7 +56,7 @@ version is `latest`: any other version is `SecretNotFoundException`, as is a key
 
 ## Writing
 
-`addVersion(name, value)` updates the file and the client's view of it, and returns `latest`:
+`addVersion(name, Secret)` updates the file and the client's view of it, and returns `latest`:
 
 - The file is read again from disk, the line holding the key is replaced in place (or a line is appended), and every
   other line, comment and line ending is kept byte for byte. Edits made to other keys since the client started are
@@ -83,8 +83,8 @@ the new content there and writes it from there. Only the keys, which are not sec
 
 - `read` returns a copy in guarded memory, which the caller closes; `close()` of the client closes it too.
 - `addVersion(name, Secret)` copies the value; the caller still owns the `Secret`.
-- `readBytes`, `readChars` and `readString` return heap copies, and `addVersion` with an array or a string copies it
-  into guarded memory and wipes that copy: the caller's own arrays and strings are outside the guarantee.
+- A heap copy the caller makes (`withBytes`, `withChars`) is wiped when its callback returns; one the caller keeps is
+  outside the guarantee.
 - Replaced values are wiped; `close()` wipes and unmaps everything.
 
 A canary test proves it: a child JVM reads a random value through the provider, writes it, and dumps its heap, which

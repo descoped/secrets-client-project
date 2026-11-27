@@ -88,9 +88,9 @@ class GoogleSecretManagerClientTest {
         google.on("GET", SECRETS + "/db-password/versions/latest:access", access("blåbær"));
         google.on("GET", SECRETS + "/db-password/versions/3:access", access("old"));
         try (SecretManagerClient client = open()) {
-            assertEquals("blåbær", client.readString("db-password"));
-            assertEquals("old", client.readString("db-password", "3"));
-            assertEquals("blåbær", client.readString("db-password", "latest"));
+            assertEquals("blåbær", Values.text(client, "db-password"));
+            assertEquals("old", Values.text(client, "db-password", "3"));
+            assertEquals("blåbær", Values.text(client, "db-password", "latest"));
         }
         assertTrue(google.requests.stream().allMatch(r -> "Bearer token-1".equals(r.authorization())),
                 "every request carries the service account's token");
@@ -113,7 +113,7 @@ class GoogleSecretManagerClientTest {
         google.on("GET", SECRETS + "/key/versions/latest:access",
                 new Response(200, FakeGoogle.accessResponse(binary, crc(binary))));
         try (SecretManagerClient client = open()) {
-            assertArrayEquals(binary, client.readBytes("key"));
+            assertArrayEquals(binary, Values.bytes(client, "key"));
         }
     }
 
@@ -122,8 +122,8 @@ class GoogleSecretManagerClientTest {
         google.tokenLifetimeSeconds = 1;
         google.on("GET", SECRETS + "/a/versions/latest:access", access("1"));
         try (SecretManagerClient client = open()) {
-            client.readString("a");
-            client.readString("a");
+            Values.text(client, "a");
+            Values.text(client, "a");
         }
         assertTrue(google.tokens.get() >= 2, "a token about to expire is replaced: " + google.tokens.get());
         List<String> used = google.requests.stream().map(FakeGoogle.Request::authorization).toList();
@@ -135,10 +135,10 @@ class GoogleSecretManagerClientTest {
         google.on("GET", SECRETS + "/missing/versions/latest:access",
                 FakeGoogle.error(404, "NOT_FOUND", "Secret [missing] not found or has no versions."));
         try (SecretManagerClient client = open()) {
-            SecretNotFoundException e = assertThrows(SecretNotFoundException.class, () -> client.readString("missing"));
+            SecretNotFoundException e = assertThrows(SecretNotFoundException.class, () -> Values.text(client, "missing"));
             assertEquals("missing", e.secretName());
-            assertThrows(SecretNotFoundException.class, () -> client.readString("a", "0"));
-            assertThrows(SecretNotFoundException.class, () -> client.readString("a", "../x"));
+            assertThrows(SecretNotFoundException.class, () -> Values.text(client, "a", "0"));
+            assertThrows(SecretNotFoundException.class, () -> Values.text(client, "a", "../x"));
         }
         assertEquals(1, google.requests.size(), "invalid versions are not sent");
     }
@@ -151,13 +151,13 @@ class GoogleSecretManagerClientTest {
         google.on("GET", SECRETS + "/c/versions/latest:access", new Response(503,
                 "{\"error\":{\"status\":{\"code\":[1]},\"details\":[{}],\"message\":\"Try again\"}}"));
         try (SecretManagerClient client = open()) {
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("a"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.text(client, "a"));
             assertEquals("Google Secret Manager returned HTTP 403 PERMISSION_DENIED when reading secret 'a':"
                     + " Permission denied on secret", e.getMessage());
-            e = assertThrows(SecretManagerException.class, () -> client.readString("b"));
+            e = assertThrows(SecretManagerException.class, () -> Values.text(client, "b"));
             assertEquals("Google Secret Manager returned HTTP 500 when reading secret 'b'", e.getMessage());
             // A malformed error object: the unexpected structures are skipped and the message is still found.
-            e = assertThrows(SecretManagerException.class, () -> client.readString("c"));
+            e = assertThrows(SecretManagerException.class, () -> Values.text(client, "c"));
             assertEquals("Google Secret Manager returned HTTP 503 when reading secret 'c': Try again", e.getMessage());
         }
     }
@@ -170,9 +170,9 @@ class GoogleSecretManagerClientTest {
         google.on("GET", SECRETS + "/b/versions/latest:access",
                 new Response(200, FakeGoogle.accessResponse(value, crc(value) + 1)));
         try (SecretManagerClient client = open()) {
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("a"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.text(client, "a"));
             assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
-            e = assertThrows(SecretManagerException.class, () -> client.readString("b"));
+            e = assertThrows(SecretManagerException.class, () -> Values.text(client, "b"));
             assertTrue(e.getMessage().startsWith("Checksum mismatch"), e.getMessage());
             assertFalse(e.getMessage().contains("hunter2"));
         }
@@ -185,14 +185,14 @@ class GoogleSecretManagerClientTest {
         google.on("POST", SECRETS + "/c:addVersion", new Response(200, "{\"name\":\"projects/1/secrets/c/versions/"));
         try (SecretManagerClient client = open()) {
             for (String name : List.of("a", "b")) {
-                SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString(name));
+                SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.text(client, name));
                 assertTrue(e.getMessage().startsWith("Cannot parse the response for secret '" + name + "'"),
                         e.getMessage());
                 for (Throwable t = e; t != null; t = t.getCause()) {
                     assertFalse(String.valueOf(t.getMessage()).contains("hunter2"), t.toString());
                 }
             }
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.addVersion("c", "v"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.add(client, "c", "v"));
             assertTrue(e.getMessage().startsWith("Cannot parse the response for secret 'c'"), e.getMessage());
         }
     }
@@ -201,9 +201,9 @@ class GoogleSecretManagerClientTest {
     void invalidNamesAreRejectedBeforeAnyRequest() throws IOException {
         try (SecretManagerClient client = open()) {
             for (String name : List.of("", "a/b", "../a", "a b", "a%2Fb", "db.password", "x".repeat(256))) {
-                assertThrows(SecretNotFoundException.class, () -> client.readString(name), name);
+                assertThrows(SecretNotFoundException.class, () -> Values.text(client, name), name);
                 SecretManagerException e = assertThrows(SecretManagerException.class,
-                        () -> client.addVersion(name, "1"), name);
+                        () -> Values.add(client, name, "1"), name);
                 assertFalse(e instanceof SecretNotFoundException, name);
             }
         }
@@ -216,7 +216,7 @@ class GoogleSecretManagerClientTest {
                 new Response(200, "{\"name\":\"projects/123/secrets/api-key/versions/7\",\"state\":\"ENABLED\"}"));
         byte[] value = "s3cret".getBytes(StandardCharsets.UTF_8);
         try (SecretManagerClient client = open()) {
-            assertEquals("7", client.addVersion("api-key", value));
+            assertEquals("7", Values.add(client, "api-key", value));
         }
         assertEquals(1, google.requests.size());
         String body = google.requests.get(0).bodyText();
@@ -231,7 +231,7 @@ class GoogleSecretManagerClientTest {
                 new Response(200, "{\"name\":\"projects/123/secrets/new/versions/1\"}"));
         google.on("POST", SECRETS + "?secretId=new", new Response(200, "{\"name\":\"projects/123/secrets/new\"}"));
         try (SecretManagerClient client = open()) {
-            assertEquals("1", client.addVersion("new", "v"));
+            assertEquals("1", Values.add(client, "new", "v"));
         }
         assertEquals("{\"replication\":{\"automatic\":{}}}",
                 google.requests("POST", SECRETS + "?secretId=new").get(0).bodyText());
@@ -245,7 +245,7 @@ class GoogleSecretManagerClientTest {
                 new Response(200, "{\"name\":\"projects/123/secrets/new/versions/1\"}"));
         google.on("POST", SECRETS + "?secretId=new", FakeGoogle.error(409, "ALREADY_EXISTS", "exists"));
         try (SecretManagerClient client = open(Map.of("secrets.replication-locations", "europe-north1, europe-west1"))) {
-            assertEquals("1", client.addVersion("new", "v"));
+            assertEquals("1", Values.add(client, "new", "v"));
         }
         assertEquals("{\"replication\":{\"userManaged\":{\"replicas\":[{\"location\":\"europe-north1\"},"
                         + "{\"location\":\"europe-west1\"}]}}}",
@@ -257,7 +257,7 @@ class GoogleSecretManagerClientTest {
         google.on("POST", SECRETS + "/a:addVersion",
                 FakeGoogle.error(400, "FAILED_PRECONDITION", "Secret is disabled"));
         try (SecretManagerClient client = open()) {
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.addVersion("a", "v"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.add(client, "a", "v"));
             assertTrue(e.getMessage().contains("400 FAILED_PRECONDITION when adding a version to secret 'a'"),
                     e.getMessage());
         }
@@ -268,9 +268,9 @@ class GoogleSecretManagerClientTest {
         SecretManagerClient client = open();
         client.close();
         client.close();
-        assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
+        assertThrows(IllegalStateException.class, () -> Values.bytes(client, "a"));
         assertThrows(IllegalStateException.class, () -> client.read("a"));
-        assertThrows(IllegalStateException.class, () -> client.addVersion("a", "v"));
+        assertThrows(IllegalStateException.class, () -> Values.add(client, "a", "v"));
         assertTrue(google.requests.isEmpty());
     }
 
@@ -329,7 +329,7 @@ class GoogleSecretManagerClientTest {
     void theRefreshTokenIsExchangedForAnAccessToken() throws IOException {
         google.on("GET", SECRETS + "/a/versions/latest:access", access("1"));
         try (SecretManagerClient client = open()) {
-            assertEquals("1", client.readString("a"));
+            assertEquals("1", Values.text(client, "a"));
         }
         assertEquals(Map.of("grant_type", "refresh_token", "client_id", FakeGoogle.CLIENT_ID,
                 "client_secret", FakeGoogle.CLIENT_SECRET, "refresh_token", FakeGoogle.REFRESH_TOKEN),
@@ -342,7 +342,7 @@ class GoogleSecretManagerClientTest {
         try (SecretManagerClient client = open()) {
             // The file was read with the old token; the token is first exchanged on the first request.
             google.refreshToken = "another";
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("a"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.text(client, "a"));
             assertTrue(e.getMessage().startsWith("Cannot get an access token from the OAuth endpoint 127.0.0.1:"),
                     e.getMessage());
             assertTrue(e.getMessage().endsWith(": HTTP 400 invalid_grant"), e.getMessage());
@@ -360,8 +360,8 @@ class GoogleSecretManagerClientTest {
                 "secrets.metadata-endpoint", google.endpoint(),
                 "secrets.endpoint", google.endpoint());
         try (SecretManagerClient client = SecretManagerClient.create(metadata)) {
-            assertEquals("1", client.readString("a"));
-            assertEquals("1", client.readString("a"));
+            assertEquals("1", Values.text(client, "a"));
+            assertEquals("1", Values.text(client, "a"));
         }
         assertEquals(List.of("Google"), google.metadataFlavors, "one token, asked for with the header");
         assertEquals("Bearer token-1", google.requests.get(1).authorization());
@@ -384,10 +384,10 @@ class GoogleSecretManagerClientTest {
         google.on("GET", SECRETS + "/empty/versions/latest:access",
                 new Response(200, "{\"payload\":{\"data\":\"\"}}").asChunks());
         try (SecretManagerClient client = open()) {
-            assertArrayEquals(large, client.readBytes("large"));
-            assertArrayEquals(large, client.readBytes("chunked"));
-            assertArrayEquals(slashes, client.readBytes("escaped"));
-            assertArrayEquals(empty, client.readBytes("empty"));
+            assertArrayEquals(large, Values.bytes(client, "large"));
+            assertArrayEquals(large, Values.bytes(client, "chunked"));
+            assertArrayEquals(slashes, Values.bytes(client, "escaped"));
+            assertArrayEquals(empty, Values.bytes(client, "empty"));
         }
     }
 
@@ -405,8 +405,8 @@ class GoogleSecretManagerClientTest {
         google.on("GET", SECRETS + "/b/versions/latest:access",
                 new Response(200, "{\"payload\":{\"data\":\"aGVsbG8\"}}"));
         try (SecretManagerClient client = open()) {
-            assertArrayEquals(hi, client.readBytes("a"));
-            assertArrayEquals(hello, client.readBytes("b"));
+            assertArrayEquals(hi, Values.bytes(client, "a"));
+            assertArrayEquals(hello, Values.bytes(client, "b"));
         }
     }
 
@@ -438,7 +438,7 @@ class GoogleSecretManagerClientTest {
         try (SecretManagerClient client = open()) {
             for (int i = 0; i < bodies.size(); i++) {
                 String name = "m" + i;
-                SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readBytes(name),
+                SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.bytes(client, name),
                         bodies.get(i));
                 assertTrue(e.getMessage().startsWith("Cannot parse the response for secret '" + name + "'")
                         || e.getMessage().startsWith("No payload.data"), bodies.get(i) + ": " + e.getMessage());
@@ -450,11 +450,11 @@ class GoogleSecretManagerClientTest {
     void aSlowServerTimesOutAndAnAbsentOneFails() throws IOException {
         google.on("GET", SECRETS + "/slow/versions/latest:access", access("1").delayed(3000));
         try (SecretManagerClient client = open(Map.of("secrets.request-timeout", "PT0.5S"))) {
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("slow"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.text(client, "slow"));
             assertEquals("Timed out reading secret 'slow'", e.getMessage());
         }
         try (SecretManagerClient client = open(Map.of("secrets.endpoint", "http://127.0.0.1:1"))) {
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("a"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.text(client, "a"));
             assertTrue(e.getMessage().startsWith("Failed reading secret 'a': "), e.getMessage());
         }
     }
@@ -510,9 +510,9 @@ class GoogleSecretManagerClientTest {
             try {
                 List<Future<?>> futures = new ArrayList<>();
                 for (int i = 0; i < 100; i++) {
-                    futures.add(executor.submit(() -> assertEquals("value-a", client.readString("a"))));
-                    futures.add(executor.submit(() -> assertEquals("value-b", client.readString("b"))));
-                    futures.add(executor.submit(() -> assertEquals("7", client.addVersion("c", "v"))));
+                    futures.add(executor.submit(() -> assertEquals("value-a", Values.text(client, "a"))));
+                    futures.add(executor.submit(() -> assertEquals("value-b", Values.text(client, "b"))));
+                    futures.add(executor.submit(() -> assertEquals("7", Values.add(client, "c", "v"))));
                 }
                 for (Future<?> future : futures) {
                     future.get(30, TimeUnit.SECONDS);
@@ -529,7 +529,7 @@ class GoogleSecretManagerClientTest {
     void callsInFlightWhenTheClientIsClosedFinishOrSeeAClosedClient() throws Exception {
         google.on("GET", SECRETS + "/a/versions/latest:access", access("value-a"));
         SecretManagerClient client = open();
-        callsRaceWithClose(client, () -> assertEquals("value-a", client.readString("a")));
+        callsRaceWithClose(client, () -> assertEquals("value-a", Values.text(client, "a")));
     }
 
     /**

@@ -71,13 +71,13 @@ class SafeConfigurationClientTest {
                 empty=
                 last=no newline""");
         try (SecretManagerClient client = open(file)) {
-            assertEquals("password1", client.readString("plain"));
-            assertEquals("key=value", client.readString("with-equals"));
-            assertEquals(" value with spaces ", client.readString("trimmed key"));
-            assertEquals("https://x:8080/a!b\\c", client.readString("url"));
-            assertEquals("blåbær €", client.readString("unicode"));
-            assertArrayEquals(new byte[0], client.readBytes("empty"));
-            assertEquals("no newline", client.readString("last"));
+            assertEquals("password1", Values.text(client, "plain"));
+            assertEquals("key=value", Values.text(client, "with-equals"));
+            assertEquals(" value with spaces ", Values.text(client, "trimmed key"));
+            assertEquals("https://x:8080/a!b\\c", Values.text(client, "url"));
+            assertEquals("blåbær €", Values.text(client, "unicode"));
+            assertArrayEquals(new byte[0], Values.bytes(client, "empty"));
+            assertEquals("no newline", Values.text(client, "last"));
         }
     }
 
@@ -86,8 +86,8 @@ class SafeConfigurationClientTest {
         Path file = dir.resolve("dos.properties");
         Files.write(file, "\uFEFFa=1\r\n# c\r\nb=2\r\n".getBytes(StandardCharsets.UTF_8));
         try (SecretManagerClient client = open(file)) {
-            assertEquals("1", client.readString("a"));
-            assertEquals("2", client.readString("b"));
+            assertEquals("1", Values.text(client, "a"));
+            assertEquals("2", Values.text(client, "b"));
         }
     }
 
@@ -118,18 +118,9 @@ class SafeConfigurationClientTest {
     @Test
     void theOnlyVersionIsLatest() throws IOException {
         try (SecretManagerClient client = open(file("a=1\n"))) {
-            assertEquals("1", client.readString("a", "latest"));
-            assertThrows(SecretNotFoundException.class, () -> client.readString("a", "1"));
-            assertThrows(SecretNotFoundException.class, () -> client.readString("missing"));
-        }
-    }
-
-    @Test
-    void readBytesReturnsACopy() throws IOException {
-        try (SecretManagerClient client = open(file("a=secret\n"))) {
-            byte[] first = client.readBytes("a");
-            first[0] = 'X';
-            assertEquals("secret", client.readString("a"));
+            assertEquals("1", Values.text(client, "a", "latest"));
+            assertThrows(SecretNotFoundException.class, () -> Values.text(client, "a", "1"));
+            assertThrows(SecretNotFoundException.class, () -> Values.text(client, "missing"));
         }
     }
 
@@ -142,7 +133,7 @@ class SafeConfigurationClientTest {
                 assertTrue(other.contentEquals(kept));
             }
             assertEquals("blåbær", kept.withChars(String::new), "closing one copy leaves the others");
-            assertEquals("blåbær", client.readString("a"), "and the client's own value");
+            assertEquals("blåbær", Values.text(client, "a"), "and the client's own value");
             assertThrows(SecretNotFoundException.class, () -> client.read("a", "1"));
             assertThrows(SecretNotFoundException.class, () -> client.read("missing"));
         }
@@ -156,10 +147,10 @@ class SafeConfigurationClientTest {
              SecretMemory memory = SecretMemory.create(Map.of());
              Secret value = memory.fromBytes("blåbær".getBytes(StandardCharsets.UTF_8));
              Secret broken = memory.fromBytes("line1\nhunter2".getBytes(StandardCharsets.UTF_8))) {
-            assertEquals("latest", client.addVersion("b", value));
+            assertEquals("latest", Values.add(client, "b", value));
             assertEquals("blåbær", value.withChars(String::new));
-            assertEquals("blåbær", client.readString("b"));
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.addVersion("c", broken));
+            assertEquals("blåbær", Values.text(client, "b"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.add(client, "c", broken));
             assertFalse(e.getMessage().contains("hunter2"));
         }
         assertEquals("a=1\nb=blåbær\n", read(file));
@@ -170,7 +161,7 @@ class SafeConfigurationClientTest {
         Path file = file("");
         try (SecretManagerClient client = open(file)) {
             assertThrows(SecretNotFoundException.class, () -> client.read("a"));
-            client.addVersion("a", "1");
+            Values.add(client, "a", "1");
         }
         assertEquals("a=1\n", read(file));
     }
@@ -182,7 +173,7 @@ class SafeConfigurationClientTest {
                 "secrets.provider", "safe-configuration",
                 "secrets.property-resource-path", file.toString(),
                 SecretMemory.GUARD_KEY, "off"))) {
-            assertEquals("1", client.readString("a"));
+            assertEquals("1", Values.text(client, "a"));
         }
         Map<String, String> invalid = Map.of(
                 "secrets.provider", "safe-configuration",
@@ -195,18 +186,18 @@ class SafeConfigurationClientTest {
     void addVersionRewritesOnlyItsLineAndKeepsEverythingElse() throws IOException {
         Path file = file("# header\r\nurl=https://x:8080\r\n\r\nquestion=41\r\nkv=key=value\r\n");
         try (SecretManagerClient client = open(file)) {
-            assertEquals("latest", client.addVersion("question", "42"));
-            assertEquals("latest", client.addVersion("added", "blåbær"));
-            assertEquals("42", client.readString("question"));
-            assertEquals("blåbær", client.readString("added"));
+            assertEquals("latest", Values.add(client, "question", "42"));
+            assertEquals("latest", Values.add(client, "added", "blåbær"));
+            assertEquals("42", Values.text(client, "question"));
+            assertEquals("blåbær", Values.text(client, "added"));
         }
         assertEquals("# header\r\nurl=https://x:8080\r\n\r\nquestion=42\r\nkv=key=value\r\nadded=blåbær\r\n",
                 read(file));
         try (SecretManagerClient client = open(file)) {
-            assertEquals("https://x:8080", client.readString("url"));
-            assertEquals("key=value", client.readString("kv"));
-            assertEquals("42", client.readString("question"));
-            assertEquals("blåbær", client.readString("added"));
+            assertEquals("https://x:8080", Values.text(client, "url"));
+            assertEquals("key=value", Values.text(client, "kv"));
+            assertEquals("42", Values.text(client, "question"));
+            assertEquals("blåbær", Values.text(client, "added"));
         }
     }
 
@@ -214,7 +205,7 @@ class SafeConfigurationClientTest {
     void addVersionAppendsAfterALastLineWithoutNewline() throws IOException {
         Path file = file("a=1");
         try (SecretManagerClient client = open(file)) {
-            client.addVersion("b", "2");
+            Values.add(client, "b", "2");
         }
         assertEquals("a=1\nb=2\n", read(file));
     }
@@ -224,7 +215,7 @@ class SafeConfigurationClientTest {
         Path file = file("a=1\n");
         try (SecretManagerClient client = open(file)) {
             Files.writeString(file, "a=1\nother=written-elsewhere\n");
-            client.addVersion("a", "2");
+            Values.add(client, "a", "2");
         }
         assertEquals("a=2\nother=written-elsewhere\n", read(file));
     }
@@ -233,9 +224,9 @@ class SafeConfigurationClientTest {
     void addVersionStoresACopy() throws IOException {
         try (SecretManagerClient client = open(file(""))) {
             byte[] value = "secret".getBytes(StandardCharsets.UTF_8);
-            client.addVersion("a", value);
+            Values.add(client, "a", value);
             value[0] = 'X';
-            assertEquals("secret", client.readString("a"));
+            assertEquals("secret", Values.text(client, "a"));
         }
     }
 
@@ -244,16 +235,16 @@ class SafeConfigurationClientTest {
         Path file = file("a=1\n");
         try (SecretManagerClient client = open(file)) {
             SecretManagerException e = assertThrows(SecretManagerException.class,
-                    () -> client.addVersion("b", "line1\nhunter2"));
+                    () -> Values.add(client, "b", "line1\nhunter2"));
             assertFalse(e.getMessage().contains("hunter2"));
-            assertThrows(SecretManagerException.class, () -> client.addVersion("b", "x\ry"));
+            assertThrows(SecretManagerException.class, () -> Values.add(client, "b", "x\ry"));
             for (String name : List.of("", " ", " b", "b\t", "\fb", "b=c", "#b", "b\nc")) {
-                assertThrows(SecretManagerException.class, () -> client.addVersion(name, "1"), name);
+                assertThrows(SecretManagerException.class, () -> Values.add(client, name, "1"), name);
             }
             byte[] value = "1".getBytes(StandardCharsets.UTF_8);
-            assertThrows(SecretManagerException.class, () -> client.addVersion("b\uD800", value),
+            assertThrows(SecretManagerException.class, () -> Values.add(client, "b\uD800", value),
                     "an unpaired surrogate would be written as '?'");
-            assertThrows(SecretNotFoundException.class, () -> client.readString("b"));
+            assertThrows(SecretNotFoundException.class, () -> Values.text(client, "b"));
         }
         assertEquals("a=1\n", read(file));
     }
@@ -264,7 +255,7 @@ class SafeConfigurationClientTest {
         Path file = file("a=1\n");
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r--r--"));
         try (SecretManagerClient client = open(file)) {
-            client.addVersion("a", "2");
+            Values.add(client, "a", "2");
         }
         assertEquals(Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
                 Files.getPosixFilePermissions(file));
@@ -280,8 +271,8 @@ class SafeConfigurationClientTest {
         Path file = file("a=1\n");
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--------"));
         try (SecretManagerClient client = open(file)) {
-            assertThrows(SecretManagerException.class, () -> client.addVersion("a", "2"));
-            assertEquals("1", client.readString("a"));
+            assertThrows(SecretManagerException.class, () -> Values.add(client, "a", "2"));
+            assertEquals("1", Values.text(client, "a"));
         }
         assertEquals("a=1\n", read(file));
     }
@@ -291,13 +282,13 @@ class SafeConfigurationClientTest {
         SecretManagerClient client = open(file("a=1\n"));
         client.close();
         client.close();
-        assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
+        assertThrows(IllegalStateException.class, () -> Values.bytes(client, "a"));
         assertThrows(IllegalStateException.class, () -> client.read("a"));
-        assertThrows(IllegalStateException.class, () -> client.addVersion("a", "2"));
+        assertThrows(IllegalStateException.class, () -> Values.add(client, "a", "2"));
         try (SecretMemory memory = SecretMemory.create(Map.of()); Secret value = memory.fromBytes(new byte[]{'2'})) {
-            assertThrows(IllegalStateException.class, () -> client.addVersion("a", value));
+            assertThrows(IllegalStateException.class, () -> Values.add(client, "a", value));
         }
-        assertThrows(IllegalStateException.class, () -> client.addVersion("#invalid", "2"),
+        assertThrows(IllegalStateException.class, () -> Values.add(client, "#invalid", "2"),
                 "a closed client fails before it checks the name");
     }
 
@@ -317,7 +308,7 @@ class SafeConfigurationClientTest {
                 while (closer.get().getState() != Thread.State.WAITING) {
                     Thread.onSpinWait();
                 }
-                return assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
+                return assertThrows(IllegalStateException.class, () -> Values.bytes(client, "a"));
             }));
             assertTrue(inCallback.await(10, TimeUnit.SECONDS));
             closer.set(Thread.ofPlatform().start(client::close));
@@ -355,8 +346,8 @@ class SafeConfigurationClientTest {
     @Test
     void blanksAroundKeysAndBeforeCommentsAreSpaceTabFormFeedAndVerticalTab() throws IOException {
         try (SecretManagerClient client = open(file("\f# a comment\n\u000B\tkey\f = value\n"))) {
-            assertEquals(" value", client.readString("key"));
-            assertThrows(SecretNotFoundException.class, () -> client.readString("# a comment"));
+            assertEquals(" value", Values.text(client, "key"));
+            assertThrows(SecretNotFoundException.class, () -> Values.text(client, "# a comment"));
         }
     }
 
@@ -365,9 +356,9 @@ class SafeConfigurationClientTest {
         Path file = file("a=1\n");
         try (SecretManagerClient client = open(file)) {
             Files.writeString(file, "a=1\nbroken line\n");
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.addVersion("a", "2"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.add(client, "a", "2"));
             assertTrue(e.getMessage().contains("line 2 has no '='"), e.getMessage());
-            assertEquals("1", client.readString("a"));
+            assertEquals("1", Values.text(client, "a"));
         }
         assertEquals("a=1\nbroken line\n", read(file));
     }
@@ -383,7 +374,7 @@ class SafeConfigurationClientTest {
             return;
         }
         try (SecretManagerClient client = open(link)) {
-            client.addVersion("a", "2");
+            Values.add(client, "a", "2");
         }
         assertTrue(Files.isSymbolicLink(link));
         assertEquals("a=2\n", read(target));
@@ -397,9 +388,9 @@ class SafeConfigurationClientTest {
                 List<Future<?>> futures = new ArrayList<>();
                 for (int i = 0; i < 200; i++) {
                     String value = String.format("%04d", i);
-                    futures.add(executor.submit(() -> client.addVersion("a", value)));
+                    futures.add(executor.submit(() -> Values.add(client, "a", value)));
                     futures.add(executor.submit(() -> {
-                        String read = client.readString("a");
+                        String read = Values.text(client, "a");
                         assertTrue(read.matches("\\d{4}"), read);
                     }));
                 }
@@ -416,8 +407,8 @@ class SafeConfigurationClientTest {
     void readsAndWritesInFlightWhenTheClientIsClosedFinishOrSeeAClosedClient() throws Exception {
         SecretManagerClient client = open(file("a=0000\n"));
         callsRaceWithClose(client, () -> {
-            client.addVersion("a", "1111");
-            assertTrue(client.readString("a").matches("\\d{4}"));
+            Values.add(client, "a", "1111");
+            assertTrue(Values.text(client, "a").matches("\\d{4}"));
         });
     }
 

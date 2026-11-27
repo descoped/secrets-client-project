@@ -34,8 +34,8 @@ the providers you use at runtime:
 Gradle: `implementation(platform("io.descoped.secrets:secrets-client-bom:3.0.0"))`, then the modules without a
 version.
 
-The BOM manages the secrets modules only. Third-party versions (dynamic-configuration) come
-through the modules' own dependencies.
+The BOM manages the secrets modules only. The modules have no third-party dependency but
+[service-provider-api](https://github.com/descoped/service-provider-api), which comes through the API module.
 
 Releases are on Maven Central. **No SNAPSHOT goes to Maven Central.** SNAPSHOTs of `master`, and of a branch when
 run by hand (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/` after a green build;
@@ -60,7 +60,6 @@ Artifact | JPMS module | Documentation
 ---|---|---
 `secrets-client-api` | `io.descoped.secrets.api` | [The API](api.md)
 `secrets-provider-safe-configuration` | `io.descoped.secrets.provider.safe` | [safe-configuration](providers/safe-configuration.md)
-`secrets-provider-dynamic-configuration` | `io.descoped.secrets.provider.dynamic` | [dynamic-configuration](providers/dynamic-configuration.md)
 `secrets-provider-google-secret-manager` | `io.descoped.secrets.provider.google` | [google-secret-manager](providers/google-secret-manager.md)
 `secrets-provider-mounted` | `io.descoped.secrets.provider.mounted` | [mounted](providers/mounted.md)
 `secrets-client-bom` | | the BOM above
@@ -93,7 +92,6 @@ without being required. On the class path, providers are found through `META-INF
 Provider | Reads | Writes | Holds values as | Use it for
 ---|---|---|---|---
 `safe-configuration` | a local `key=value` file | yes, atomically, owner-only | guarded memory | local development and tests
-`dynamic-configuration` | a properties file, a secret directory, inline values | no | strings | tests, migration from property files
 `google-secret-manager` | Google Secret Manager | yes, creating secrets as needed | guarded memory, except copies the JDK's TLS makes ([details](providers/google-secret-manager.md#memory-and-tls)) | production on Google Cloud
 `mounted` | files the platform mounts (Cloud Run, Kubernetes, Secrets Store CSI) | no | guarded memory, read on every `read` | production where the platform mounts secrets: no credential in the process
 

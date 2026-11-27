@@ -14,9 +14,8 @@ import java.util.Set;
  * Manager provider there.
  *
  * <p>The file is read, parsed and rewritten in guarded memory ({@link io.descoped.secrets.api.SecretMemory}), and
- * every value is held there: no value is on the Java heap unless the caller asks for a heap copy
- * ({@code readBytes}, {@code readChars}, {@code readString}, or the hand-over callbacks of
- * {@link io.descoped.secrets.api.Secret}). This needs native access
+ * every value is held there: no value is on the Java heap unless the caller asks for a heap copy (the hand-over
+ * callbacks of {@link io.descoped.secrets.api.Secret}). This needs native access
  * ({@code --enable-native-access=io.descoped.secrets.api}); without it, creating the client fails unless
  * {@value io.descoped.secrets.api.SecretMemory#GUARD_KEY} is {@code off}.
  *

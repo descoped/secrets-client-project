@@ -8,7 +8,6 @@ import io.descoped.secrets.api.SecretNotFoundException;
 
 import java.io.IOException;
 import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -25,9 +24,7 @@ import java.util.function.Function;
 /**
  * Secrets in a local file, one {@code key=value} per line, read once when the client is created. See
  * {@link SafeConfigurationClientInitializer} for the format. The file is read, parsed and rewritten in guarded memory
- * ({@link SecretsFile}), and each value is held in a {@link Secret} of its own: no value is ever on the Java heap,
- * except the copies {@link #readBytes(String, String)} and the array {@code addVersion} return or take, which belong
- * to the caller.
+ * ({@link SecretsFile}), and each value is held in a {@link Secret} of its own: no value is ever on the Java heap.
  */
 final class SafeConfigurationClient implements SecretManagerClient {
 
@@ -81,12 +78,6 @@ final class SafeConfigurationClient implements SecretManagerClient {
                 })));
     }
 
-    @Override
-    public byte[] readBytes(String secretName, String secretVersion) {
-        return withStored(secretName, secretVersion,
-                stored -> stored.withSegment(value -> value.toArray(ValueLayout.JAVA_BYTE)));
-    }
-
     private <R> R withStored(String secretName, String secretVersion, Function<Secret, R> action) {
         Objects.requireNonNull(secretName, SECRET_NAME);
         lock.readLock().lock();
@@ -99,20 +90,6 @@ final class SafeConfigurationClient implements SecretManagerClient {
             return action.apply(stored);
         } finally {
             lock.readLock().unlock();
-        }
-    }
-
-    /**
-     * Copies the value into guarded memory, wiping the copy on the heap, and adds it as
-     * {@link #addVersion(String, Secret)} does.
-     */
-    @Override
-    public String addVersion(String secretName, byte[] secretValue) {
-        Objects.requireNonNull(secretName, SECRET_NAME);
-        Objects.requireNonNull(secretValue, SECRET_VALUE);
-        checkOpen();
-        try (Secret value = memory.fromBytes(secretValue.clone())) {
-            return addVersion(secretName, value);
         }
     }
 
