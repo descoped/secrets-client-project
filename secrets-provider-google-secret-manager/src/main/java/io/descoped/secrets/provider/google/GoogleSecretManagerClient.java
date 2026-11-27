@@ -9,7 +9,6 @@ import io.descoped.secrets.api.SecretNotFoundException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -73,26 +72,6 @@ final class GoogleSecretManagerClient implements SecretManagerClient {
                 throw failure(response, "reading", secretName);
             }
             return payload(response.body(), secretName);
-        }
-    }
-
-    @Override
-    public byte[] readBytes(String secretName, String secretVersion) {
-        try (Secret value = read(secretName, secretVersion)) {
-            return value.withSegment(segment -> segment.toArray(ValueLayout.JAVA_BYTE));
-        }
-    }
-
-    /**
-     * Copies the value into guarded memory, wiping the heap copy, and adds it as {@link #addVersion(String, Secret)}.
-     */
-    @Override
-    public String addVersion(String secretName, byte[] secretValue) {
-        Objects.requireNonNull(secretName, SECRET_NAME);
-        Objects.requireNonNull(secretValue, SECRET_VALUE);
-        checkOpen();
-        try (Secret value = memory.fromBytes(secretValue.clone())) {
-            return addVersion(secretName, value);
         }
     }
 

@@ -79,8 +79,8 @@ class GoogleSecretManagerTlsTest {
             google.on("POST", SECRETS + "/a:addVersion",
                     new Response(200, "{\"name\":\"projects/1/secrets/a/versions/2\"}"));
             try (SecretManagerClient client = open(google, google.endpoint())) {
-                assertEquals("blåbær", client.readString("a"));
-                assertEquals("2", client.addVersion("a", "v"));
+                assertEquals("blåbær", Values.text(client, "a"));
+                assertEquals("2", Values.add(client, "a", "v"));
             }
             assertEquals("Bearer token-1", google.requests.get(0).authorization());
         }
@@ -90,7 +90,7 @@ class GoogleSecretManagerTlsTest {
     void theHostNameIsVerified() throws IOException {
         try (FakeGoogle google = new FakeGoogle(matching); FakeGoogle impostor = new FakeGoogle(otherName)) {
             try (SecretManagerClient client = open(google, impostor.endpoint())) {
-                SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readString("a"));
+                SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.text(client, "a"));
                 assertInstanceOf(SSLHandshakeException.class, e.getCause(), e.toString());
             }
             assertTrue(impostor.requests.isEmpty(), "nothing is sent to a server that is not who it claims to be");

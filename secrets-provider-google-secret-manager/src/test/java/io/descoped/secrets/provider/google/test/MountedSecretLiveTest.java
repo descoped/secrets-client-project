@@ -46,8 +46,8 @@ class MountedSecretLiveTest {
                 assertTrue(again.contentEquals(fromFile), "a second read of the mounted file differs");
             }
             // As heap copies too; compared without printing a byte of them, and wiped.
-            byte[] fileCopy = mounted.readBytes(name);
-            byte[] apiCopy = google.readBytes(secret);
+            byte[] fileCopy = Values.bytes(mounted, name);
+            byte[] apiCopy = Values.bytes(google, secret);
             try {
                 assertTrue(Arrays.equals(fileCopy, apiCopy), "the heap copies differ");
             } finally {

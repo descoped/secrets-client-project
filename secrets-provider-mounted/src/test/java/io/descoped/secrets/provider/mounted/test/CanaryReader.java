@@ -4,6 +4,7 @@ import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.test.support.HeapDump;
 
+import java.lang.foreign.ValueLayout;
 import java.nio.file.Path;
 import java.util.Map;
 
@@ -17,8 +18,8 @@ import java.util.Map;
  *     <li>{@code read-open}: the same, but dump while the client and the secret are open.</li>
  *     <li>{@code read-stream}: read it from a FIFO that {@code cat} fills from the canary file, outside this JVM: a
  *     file of unknown size, read through the buffer that grows (the canary file is padded past its first size).</li>
- *     <li>{@code read-bytes}: {@code readBytes}, whose array is the caller's and is kept: the dump must hold it. This
- *     proves the test sees a copy that this path makes.</li>
+ *     <li>{@code heap-copy}: {@code read}, then a heap copy that the caller makes and keeps: the dump must hold it.
+ *     This proves the test sees a copy that this path makes.</li>
  * </ul>
  */
 public final class CanaryReader {
@@ -63,7 +64,7 @@ public final class CanaryReader {
                     // Dumped after everything is closed.
                 }
                 case "read-open" -> HeapDump.dump(dump);
-                case "read-bytes" -> kept = client.readBytes(name);
+                case "heap-copy" -> kept = secret.withSegment(segment -> segment.toArray(ValueLayout.JAVA_BYTE));
                 default -> throw new IllegalArgumentException("Unknown mode " + args[2]);
             }
         }

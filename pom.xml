@@ -10,8 +10,8 @@
     <packaging>pom</packaging>
 
     <name>Secrets Client Project</name>
-    <description>A provider based API for reading and writing secrets, with providers for a local properties file,
-        dynamic-configuration and Google Secret Manager.
+    <description>A provider based API for reading and writing secrets off the Java heap, with providers for a local
+        properties file, Google Secret Manager and secrets the platform mounts as files.
     </description>
     <url>https://github.com/descoped/secrets-client-project</url>
     <inceptionYear>2020</inceptionYear>
@@ -20,7 +20,6 @@
         <module>secrets-client-bom</module>
         <module>secrets-client-api</module>
         <module>secrets-provider-safe-configuration</module>
-        <module>secrets-provider-dynamic-configuration</module>
         <module>secrets-provider-google-secret-manager</module>
         <module>secrets-provider-mounted</module>
         <!-- Test support for the modules above; never published. -->
@@ -41,8 +40,6 @@
         <!-- Dependency versions. Kept as properties, not in dependencyManagement, so that importing
              secrets-client-bom (which inherits this POM) manages the secrets modules only. -->
         <service-provider-api.version>3.0.1</service-provider-api.version>
-        <dynamic-configuration.version>3.0.2</dynamic-configuration.version>
-        <slf4j.version>2.0.20</slf4j.version>
         <junit.version>6.1.3</junit.version>
     </properties>
 

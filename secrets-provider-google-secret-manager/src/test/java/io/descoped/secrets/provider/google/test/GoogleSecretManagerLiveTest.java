@@ -71,11 +71,11 @@ class GoogleSecretManagerLiveTest {
         byte[] large = new byte[60 * 1024];
         new SecureRandom().nextBytes(large);
         try (SecretManagerClient client = SecretManagerClient.create(configuration())) {
-            String v1 = client.addVersion(SECRET, first);
-            String v2 = client.addVersion(SECRET, large);
-            assertArrayEquals(large, client.readBytes(SECRET));
-            assertEquals(first, client.readString(SECRET, v1));
-            assertArrayEquals(large, client.readBytes(SECRET, v2));
+            String v1 = Values.add(client, SECRET, first);
+            String v2 = Values.add(client, SECRET, large);
+            assertArrayEquals(large, Values.bytes(client, SECRET));
+            assertEquals(first, Values.text(client, SECRET, v1));
+            assertArrayEquals(large, Values.bytes(client, SECRET, v2));
             try (Secret secret = client.read(SECRET, v1)) {
                 secret.withBytes(bytes -> {
                     assertArrayEquals(first.getBytes(StandardCharsets.UTF_8), bytes);
@@ -83,7 +83,7 @@ class GoogleSecretManagerLiveTest {
                 });
             }
             String absent = "secrets-client-live-absent-" + UUID.randomUUID();
-            assertThrows(SecretNotFoundException.class, () -> client.readBytes(absent));
+            assertThrows(SecretNotFoundException.class, () -> Values.bytes(client, absent));
         }
     }
 

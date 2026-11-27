@@ -7,7 +7,6 @@ import io.descoped.secrets.api.SecretMemory;
 import io.descoped.secrets.api.SecretNotFoundException;
 
 import java.io.IOException;
-import java.lang.foreign.ValueLayout;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -79,21 +78,6 @@ final class MountedClient implements SecretManagerClient {
         } finally {
             lock.readLock().unlock();
         }
-    }
-
-    @Override
-    public byte[] readBytes(String secretName, String secretVersion) {
-        try (Secret secret = read(secretName, secretVersion)) {
-            return secret.withSegment(value -> value.toArray(ValueLayout.JAVA_BYTE));
-        }
-    }
-
-    @Override
-    public String addVersion(String secretName, byte[] secretValue) {
-        Objects.requireNonNull(secretName, SECRET_NAME);
-        Objects.requireNonNull(secretValue, SECRET_VALUE);
-        checkOpen();
-        throw readOnly();
     }
 
     @Override

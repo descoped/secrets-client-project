@@ -12,9 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,15 +26,6 @@ class SecretManagerClientTest {
 
     private static MemoryClient memory() {
         return (MemoryClient) SecretManagerClient.create(MEMORY);
-    }
-
-    private static boolean wiped(byte[] bytes) {
-        for (byte b : bytes) {
-            if (b != 0) {
-                return false;
-            }
-        }
-        return true;
     }
 
     @Test
@@ -78,106 +67,33 @@ class SecretManagerClientTest {
     }
 
     @Test
-    void readOfTheLatestVersionAndAddVersionOfASecretRoundTrip() {
+    void readOfTheLatestOrAGivenVersionAndAddVersionRoundTrip() {
         try (MemoryClient client = memory();
              SecretMemory own = SecretMemory.create(Map.of(SecretMemory.GUARD_KEY, "off"));
-             Secret value = own.fromBytes("blåbær".getBytes(StandardCharsets.UTF_8))) {
-            assertEquals("1", client.addVersion("a", value));
-            byte[] handedOver = client.received.getLast();
-            assertTrue(wiped(handedOver), "the heap copy is wiped when addVersion returns");
-            try (Secret read = client.read("a")) {
-                assertTrue(read.contentEquals(value));
+             Secret first = own.fromBytes("blåbær".getBytes(StandardCharsets.UTF_8));
+             Secret second = own.fromChars("hei".toCharArray())) {
+            assertEquals("1", client.addVersion("a", first));
+            assertEquals("2", client.addVersion("a", second));
+            try (Secret latest = client.read("a"); Secret one = client.read("a", "1")) {
+                assertTrue(latest.contentEquals(second));
+                assertTrue(one.contentEquals(first));
+                assertEquals("blåbær", one.withChars(String::new));
             }
-            assertTrue(wiped(client.returned.getLast()), "read wipes the array it copied");
-            assertThrows(NullPointerException.class, () -> client.addVersion(null, value));
-            assertThrows(NullPointerException.class, () -> client.addVersion("a", (Secret) null));
-            assertThrows(SecretNotFoundException.class, () -> client.read("missing"));
-        }
-    }
-
-    @Test
-    void stringsAndCharsRoundTripAsUtf8() {
-        try (MemoryClient client = memory()) {
-            assertEquals("1", client.addVersion("greeting", "blåbær €"));
-            assertEquals("2", client.addVersion("greeting", "hei".toCharArray()));
-            assertEquals("hei", client.readString("greeting"));
-            assertEquals("blåbær €", client.readString("greeting", "1"));
-            assertArrayEquals("blåbær €".toCharArray(), client.readChars("greeting", "1"));
-            assertArrayEquals("hei".getBytes(StandardCharsets.UTF_8), client.readBytes("greeting"));
-            assertArrayEquals(new char[0], readEmpty(client));
-        }
-    }
-
-    private static char[] readEmpty(MemoryClient client) {
-        client.addVersion("empty", new byte[0]);
-        return client.readChars("empty");
-    }
-
-    @Test
-    void readCharsAndReadStringWipeTheBytesTheyRead() {
-        try (MemoryClient client = memory()) {
-            client.addVersion("password", "secret");
-            client.readChars("password");
-            client.readString("password");
-            assertEquals(2, client.returned.size());
-            client.returned.forEach(bytes -> assertTrue(wiped(bytes)));
-        }
-    }
-
-    @Test
-    void addVersionFromCharsOrStringWipesTheBytesItPassedOn() {
-        try (MemoryClient client = memory()) {
-            client.addVersion("a", "secret".toCharArray());
-            client.addVersion("b", "secret");
-            assertEquals(2, client.received.size());
-            client.received.forEach(bytes -> assertTrue(wiped(bytes)));
-            assertEquals("secret", client.readString("a"));
-            assertEquals("secret", client.readString("b"));
-        }
-    }
-
-    @Test
-    void addVersionFromCharsLeavesTheCallersArrayAlone() {
-        try (MemoryClient client = memory()) {
-            char[] value = "secret".toCharArray();
-            client.addVersion("a", value);
-            assertArrayEquals("secret".toCharArray(), value);
-        }
-    }
-
-    @Test
-    void invalidUtf8FailsWithoutTheValueInTheMessageAndIsWiped() {
-        try (MemoryClient client = memory()) {
-            byte[] invalid = {'p', 'w', (byte) 0xC3, (byte) 0x28};
-            client.addVersion("binary", invalid);
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readChars("binary"));
-            assertTrue(e.getMessage().contains("'binary'"));
-            assertFalse(e.getMessage().contains("pw"));
-            assertTrue(wiped(client.returned.get(0)));
-        }
-    }
-
-    @Test
-    void anUnpairedSurrogateIsRejectedNotReplaced() {
-        try (MemoryClient client = memory()) {
-            SecretManagerException e = assertThrows(SecretManagerException.class,
-                    () -> client.addVersion("bad", "ab\uD800"));
-            assertTrue(e.getMessage().contains("'bad'"));
-            assertThrows(SecretManagerException.class, () -> client.addVersion("bad", new char[]{'a', '\uDC00'}));
-            assertTrue(client.received.isEmpty());
         }
     }
 
     @Test
     void aMissingSecretOrVersionThrowsSecretNotFound() {
-        try (MemoryClient client = memory()) {
-            SecretNotFoundException e = assertThrows(SecretNotFoundException.class, () -> client.readString("missing"));
+        try (MemoryClient client = memory();
+             SecretMemory own = SecretMemory.create(Map.of(SecretMemory.GUARD_KEY, "off"));
+             Secret x = own.fromChars(new char[]{'x'})) {
+            SecretNotFoundException e = assertThrows(SecretNotFoundException.class, () -> client.read("missing"));
             assertEquals("missing", e.secretName());
             assertNull(e.secretVersion());
             assertEquals("Secret 'missing' not found", e.getMessage());
 
-            client.addVersion("present", "x");
-            e = assertThrows(SecretNotFoundException.class, () -> client.readChars("present", "7"));
+            client.addVersion("present", x);
+            e = assertThrows(SecretNotFoundException.class, () -> client.read("present", "7"));
             assertEquals("7", e.secretVersion());
             assertEquals("Secret 'present' version '7' not found", e.getMessage());
             assertInstanceOf(SecretManagerException.class, e);
@@ -186,10 +102,12 @@ class SecretManagerClientTest {
 
     @Test
     void nullArgumentsAreRejected() {
-        try (MemoryClient client = memory()) {
-            assertThrows(NullPointerException.class, () -> client.addVersion("a", (String) null));
-            assertThrows(NullPointerException.class, () -> client.addVersion("a", (char[]) null));
-            assertThrows(NullPointerException.class, () -> client.readString(null));
+        try (MemoryClient client = memory();
+             SecretMemory own = SecretMemory.create(Map.of(SecretMemory.GUARD_KEY, "off"));
+             Secret x = own.fromChars(new char[]{'x'})) {
+            assertThrows(NullPointerException.class, () -> client.read(null));
+            assertThrows(NullPointerException.class, () -> client.addVersion(null, x));
+            assertThrows(NullPointerException.class, () -> client.addVersion("a", null));
         }
     }
 }

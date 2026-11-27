@@ -4,10 +4,11 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=descoped_secrets-client-project&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=descoped_secrets-client-project)
 
 A Java library for reading and writing secrets through one API, with the backend chosen by configuration: a local
-file, dynamic-configuration, or Google Secret Manager. Values are handled as bytes and wiped when no longer needed,
-and never appear in exception messages. Java 25 or later, on the module path or the class path.
+file, Google Secret Manager, or secrets the platform mounts as files. Values are held in guarded memory off the Java
+heap, wiped when no longer needed, and never appear in exception messages. Java 25 or later, on the module path or
+the class path.
 
-**[Documentation](docs/README.md)**: getting started, the API, each provider, and migrating from 2.x.
+**[Documentation](docs/README.md)**: getting started, the API, each provider, and migrating from earlier versions.
 
 Changes by version are in the [changelog](CHANGELOG.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -18,9 +19,12 @@ An application compiles against `secrets-client-api` and creates a client from a
 ```java
 try (SecretManagerClient client = SecretManagerClient.create(Map.of(
         "secrets.provider", "google-secret-manager",
-        "secrets.project-id", "my-project"))) {
-    char[] password = client.readChars("db-password");
-    // use it, then wipe it: Arrays.fill(password, '\0')
+        "secrets.project-id", "my-project"));
+     Secret password = client.read("db-password")) {
+    password.withChars(chars -> {                    // a heap copy, wiped when the call returns
+        connect(chars);
+        return null;
+    });
 }
 ```
 
@@ -35,7 +39,6 @@ One Maven reactor; every module shares the version of the root POM.
 ```
 secrets-client-api/                        the API and the provider service
 secrets-provider-safe-configuration/       provider: a local key=value file, for development and tests
-secrets-provider-dynamic-configuration/    provider: dynamic-configuration, read-only
 secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST, no dependencies)
 secrets-provider-mounted/                  provider: secrets the platform mounts as files, read-only
 secrets-client-bom/                        BOM of the modules above

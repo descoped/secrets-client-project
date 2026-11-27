@@ -49,16 +49,16 @@ class MountedClientTest {
     void aValueIsTheFileExactlyAndIsReadOnEveryRead() throws IOException {
         try (SecretManagerClient client = open()) {
             Files.writeString(secrets.resolve("api-key"), "s3cret\n");
-            assertEquals("s3cret\n", client.readString("api-key"));
-            assertEquals("s3cret\n", client.readString("api-key", "latest"));
+            assertEquals("s3cret\n", Values.text(client, "api-key"));
+            assertEquals("s3cret\n", Values.text(client, "api-key", "latest"));
             try (Secret secret = client.read("api-key")) {
                 assertEquals("s3cret\n", secret.withChars(String::new));
             }
             // Rotated in place: the next read sees it.
             Files.writeString(secrets.resolve("api-key"), "rotated");
-            assertEquals("rotated", client.readString("api-key"));
+            assertEquals("rotated", Values.text(client, "api-key"));
             Files.write(secrets.resolve("empty"), new byte[0]);
-            assertArrayEquals(new byte[0], client.readBytes("empty"));
+            assertArrayEquals(new byte[0], Values.bytes(client, "empty"));
         }
     }
 
@@ -68,13 +68,13 @@ class MountedClientTest {
         new Random(42).nextBytes(large);
         try (SecretManagerClient client = open()) {
             Files.write(secrets.resolve("large.bin"), large);
-            assertArrayEquals(large, client.readBytes("large.bin"));
+            assertArrayEquals(large, Values.bytes(client, "large.bin"));
             Files.write(secrets.resolve("too-large"), new byte[4 * 1024 * 1024 + 1]);
             SecretManagerException e = assertThrows(SecretManagerException.class,
-                    () -> client.readBytes("too-large"));
+                    () -> Values.bytes(client, "too-large"));
             assertTrue(e.getMessage().contains("larger than"), e.getMessage());
             Files.write(secrets.resolve("at-limit"), new byte[4 * 1024 * 1024]);
-            assertEquals(4 * 1024 * 1024, client.readBytes("at-limit").length);
+            assertEquals(4 * 1024 * 1024, Values.bytes(client, "at-limit").length);
         }
     }
 
@@ -100,7 +100,7 @@ class MountedClientTest {
                     throw new IllegalStateException(e);
                 }
             });
-            assertArrayEquals(value, client.readBytes("stream"));
+            assertArrayEquals(value, Values.bytes(client, "stream"));
             writer.get(10, TimeUnit.SECONDS);
         }
     }
@@ -110,13 +110,13 @@ class MountedClientTest {
         try (SecretManagerClient client = open()) {
             Files.createDirectories(secrets.resolve("db"));
             Files.writeString(secrets.resolve("db/password"), "pw");
-            assertEquals("pw", client.readString("db/password"));
+            assertEquals("pw", Values.text(client, "db/password"));
             // Kubernetes: <dir>/key -> ..data/key, ..data -> ..2026_11_27_12_00_00.1/
             Path version = Files.createDirectories(secrets.resolve("..2026_11_27_12_00_00.1"));
             Files.writeString(version.resolve("token"), "t0ken");
             Files.createSymbolicLink(secrets.resolve("..data"), version.getFileName());
             Files.createSymbolicLink(secrets.resolve("token"), Path.of("..data", "token"));
-            assertEquals("t0ken", client.readString("token"));
+            assertEquals("t0ken", Values.text(client, "token"));
         }
     }
 
@@ -153,7 +153,7 @@ class MountedClientTest {
             });
             try {
                 for (int i = 0; i < 60000; i++) {
-                    assertFalse(client.readString("token").isEmpty());
+                    assertFalse(Values.text(client, "token").isEmpty());
                 }
             } finally {
                 stop.set(true);
@@ -167,7 +167,7 @@ class MountedClientTest {
         try (SecretManagerClient client = open()) {
             Path outside = Files.writeString(dir.resolve("outside"), "not yours");
             Files.createSymbolicLink(secrets.resolve("escape"), outside);
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readBytes("escape"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.bytes(client, "escape"));
             assertTrue(e.getMessage().contains("outside"), e.getMessage());
             assertFalse(e.getMessage().contains("not yours"), e.getMessage());
         }
@@ -180,7 +180,7 @@ class MountedClientTest {
         try (SecretManagerClient client = open()) {
             Files.createDirectories(secrets.resolve("db"));
             Files.writeString(dir.resolve("outside"), "x");
-            assertThrows(SecretNotFoundException.class, () -> client.readBytes(name));
+            assertThrows(SecretNotFoundException.class, () -> Values.bytes(client, name));
         }
     }
 
@@ -188,12 +188,12 @@ class MountedClientTest {
     void onlyTheLatestVersionExistsAndWritesAreRefused() throws IOException {
         try (SecretManagerClient client = open()) {
             Files.writeString(secrets.resolve("a"), "v");
-            assertThrows(SecretNotFoundException.class, () -> client.readBytes("a", "1"));
-            assertThrows(UnsupportedOperationException.class, () -> client.addVersion("a", "w"));
+            assertThrows(SecretNotFoundException.class, () -> Values.bytes(client, "a", "1"));
+            assertThrows(UnsupportedOperationException.class, () -> Values.add(client, "a", "w"));
             try (Secret value = client.read("a")) {
-                assertThrows(UnsupportedOperationException.class, () -> client.addVersion("a", value));
+                assertThrows(UnsupportedOperationException.class, () -> Values.add(client, "a", value));
             }
-            assertEquals("v", client.readString("a"));
+            assertEquals("v", Values.text(client, "a"));
         }
     }
 
@@ -204,9 +204,9 @@ class MountedClientTest {
         Secret secret = client.read("a");
         client.close();
         client.close();
-        assertThrows(IllegalStateException.class, () -> client.readBytes("a"));
+        assertThrows(IllegalStateException.class, () -> Values.bytes(client, "a"));
         assertThrows(IllegalStateException.class, () -> client.read("a"));
-        assertThrows(IllegalStateException.class, () -> client.addVersion("a", "w"));
+        assertThrows(IllegalStateException.class, () -> Values.add(client, "a", "w"));
         assertThrows(IllegalStateException.class, () -> secret.withSegment(segment -> null));
     }
 
@@ -228,7 +228,7 @@ class MountedClientTest {
     void secretsAreNotInMessages() throws IOException {
         try (SecretManagerClient client = open()) {
             Files.write(secrets.resolve("big"), "hunter2".repeat(700_000).getBytes(StandardCharsets.UTF_8));
-            SecretManagerException e = assertThrows(SecretManagerException.class, () -> client.readBytes("big"));
+            SecretManagerException e = assertThrows(SecretManagerException.class, () -> Values.bytes(client, "big"));
             assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
         }
     }

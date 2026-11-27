@@ -36,7 +36,7 @@ class MountedCanaryTest {
     }
 
     @Test
-    void theCopyReadBytesReturnsIsFound() throws Exception {
-        HeapCanary.create(dir).run(SUBJECT, "read-bytes").assertLeaked("ascii");
+    void aHeapCopyTheCallerKeepsIsFound() throws Exception {
+        HeapCanary.create(dir).run(SUBJECT, "heap-copy").assertLeaked("ascii");
     }
 }

@@ -3,6 +3,7 @@ package consumer;
 import io.descoped.secrets.api.Secret;
 import io.descoped.secrets.api.SecretManagerClient;
 import io.descoped.secrets.api.SecretManagerException;
+import io.descoped.secrets.api.SecretMemory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -25,22 +26,17 @@ public final class Main {
             Files.writeString(file, "answer=42\n");
             try (SecretManagerClient client = SecretManagerClient.create(Map.of(
                     "secrets.provider", "safe-configuration",
-                    "secrets.property-resource-path", file.toString()))) {
-                client.addVersion("question", "life");
-                check("safe-configuration", "42", client.readString("answer"));
-                check("safe-configuration write", "life", client.readString("question"));
-                try (Secret answer = client.read("answer")) {
+                    "secrets.property-resource-path", file.toString()));
+                 SecretMemory memory = SecretMemory.create(Map.of());
+                 Secret life = memory.fromChars("life".toCharArray())) {
+                client.addVersion("question", life);
+                try (Secret answer = client.read("answer"); Secret question = client.read("question")) {
                     check("safe-configuration guarded read", "42", answer.withChars(String::new));
+                    check("safe-configuration write", "life", question.withChars(String::new));
                 }
             }
         } finally {
             Files.deleteIfExists(file);
-        }
-
-        try (SecretManagerClient client = SecretManagerClient.create(Map.of(
-                "secrets.provider", "dynamic-configuration",
-                "secrets.values.answer", "42"))) {
-            check("dynamic-configuration", "42", client.readString("answer"));
         }
 
         Path mount = Files.createTempDirectory("mounted");

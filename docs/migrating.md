@@ -1,4 +1,20 @@
-# Migrating from 2.x
+# Migrating
+
+## Migrating from 3.x to 4.0
+
+4.0 keeps values off the Java heap, so the client hands them over only as a `Secret`, in guarded memory. Start the
+JVM with `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path).
+
+3.x | 4.0
+---|---
+`char[] password = client.readChars(name)`, then `Arrays.fill` | `try (Secret password = client.read(name)) { password.withChars(chars -> ...); }`, the copy wiped when the callback returns
+`client.readBytes(name)` | `password.withBytes(bytes -> ...)`, or `withSegment` to stay off the heap
+`client.readString(name)` | `secret.withChars(String::new)`, if a `String` is really needed
+`client.addVersion(name, chars)` (or `byte[]`, `String`) | `try (SecretMemory memory = SecretMemory.create(Map.of()); Secret value = memory.fromChars(chars)) { client.addVersion(name, value); }`; `fromChars`/`fromBytes` wipe the array
+provider `dynamic-configuration` | removed: safe-configuration for a local file, `mounted` for a directory of secret files (one file per secret)
+A provider implements `readBytes` and `addVersion(String, byte[])` | it implements `read(String, String)` and `addVersion(String, Secret)`; see [Writing a provider](writing-a-provider.md)
+
+## Migrating from 2.x
 
 3.0.0 is a breaking release. The Maven coordinates are unchanged.
 
@@ -20,7 +36,7 @@ Google replication of new secrets | `europe-north1` | automatic, or `secrets.rep
 Provider implementation classes | public | package-private; only the initializers are public
 `service-provider-api` | 2.x | 3.x (`providerId()` is gone; the `@ProviderName` annotation names a provider)
 
-## safe-configuration files written by 2.x
+### safe-configuration files written by 2.x
 
 Files written by 2.x `addVersion` went through `java.util.Properties.store(OutputStream, ..)`, which escapes values:
 `\\` for `\`, `\=`, `\:`, `\#`, `\!`, `\t`, `\n`, `\r`, `\f`, `\ ` for a leading space, and `\uXXXX` for every

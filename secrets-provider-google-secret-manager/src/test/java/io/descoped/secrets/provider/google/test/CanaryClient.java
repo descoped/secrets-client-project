@@ -52,7 +52,7 @@ public final class CanaryClient {
                 HeapDump.checksum(segment);
                 return null;
             });
-            client.addVersion("copy", secret);
+            Values.add(client, "copy", secret);
         }
         HeapDump.dump(dump);
     }

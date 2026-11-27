@@ -62,7 +62,7 @@ The identity needs, on the project or on each secret:
 
 Operation | Permission | Predefined role
 ---|---|---
-`read`, `readBytes`, `readChars`, `readString` | `secretmanager.versions.access` | `roles/secretmanager.secretAccessor`
+`read` | `secretmanager.versions.access` | `roles/secretmanager.secretAccessor`
 `addVersion` on an existing secret | `secretmanager.versions.add` | `roles/secretmanager.secretVersionAdder`
 `addVersion` on a new secret (creates it, then adds the version) | `secretmanager.secrets.create` and `secretmanager.versions.add` | `roles/secretmanager.admin`
 
@@ -94,8 +94,7 @@ Error messages never contain the response body or the value.
 
 Each request is built in guarded memory (the access token in the `Authorization` header, the value Base64-encoded in
 the body) and written to the socket from there; each response is read into guarded memory, its JSON parsed in place
-and the value decoded from Base64 straight into the `Secret` that `read` returns. `readBytes`, `readChars` and
-`readString` return heap copies for the caller, as their contract says.
+and the value decoded from Base64 straight into the `Secret` that `read` returns.
 
 TLS is the JDK's `SSLEngine` (TLS 1.3 or 1.2, the default trust store, host name verification and SNI), and that is
 where the guarantee ends. The provider hands `SSLEngine` only direct buffers, but the JDK's TLS and cipher code copies
