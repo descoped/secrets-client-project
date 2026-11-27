@@ -116,8 +116,10 @@ just ci-log <run>                # the failing lines of a CI run
   them without asking. A task that comes back often and has no recipe gets one, rather than an ad-hoc command line
   (an environment prefix, `docker`, `curl`, an inline script), which makes the owner approve it.
 - Edit files with the editor tools, not with `python3`, `sed` or heredocs.
-- Nothing asks but deleting: the owner's own settings allow every command and make only removals (`rm`,
-  `git clean`, `git reset --hard`, force pushes) ask. This repository has no `.claude/settings.json` on purpose: its
-  rules would override the owner's, and they would also apply to the Claude bot in CI. Pushing branches, creating, commenting on and merging pull requests (after the gate:
+- `.claude/settings.json` holds the team rules, set up like apomesh's for long autonomous work: auto mode, and
+  regular operations (`git`, `gh`, `just`, `./mvnw`, `docker`, file tools) run without asking. Only what destroys
+  work asks (`git reset --hard`, `git clean`, force pushes), and only what destroys or exposes is refused (deleting
+  a repository or release, `gh secret`, keychain reads). Keep it that minimal: never add `ask` or `deny` rules for
+  regular operations. Pushing branches, creating, commenting on and merging pull requests (after the gate:
   CI, SonarCloud, the review triaged) are authorized; say in the same message what is applied and why. Releases still
   wait for the owner's word (see the invariants).
