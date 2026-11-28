@@ -52,7 +52,8 @@ SNAPSHOTs are never on Maven Central. CI publishes them to `https://maven.descop
 </repository>
 ```
 
-[Getting started](docs/getting-started.md) has the BOM, which aligns the versions of every module.
+Keep the id `descoped-snapshots-public`, and depend on `X.Y.Z-SNAPSHOT`, never on a timestamped build;
+[Getting started](docs/getting-started.md) says why, and has the BOM, which aligns the versions of every module.
 
 Read a secret:
 
