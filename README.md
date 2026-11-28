@@ -2,90 +2,117 @@
 
 [![CI](https://github.com/descoped/secrets-client-project/actions/workflows/ci.yml/badge.svg)](https://github.com/descoped/secrets-client-project/actions/workflows/ci.yml)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=descoped_secrets-client-project&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=descoped_secrets-client-project)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-A Java library for reading and writing secrets through one API, with the backend chosen by configuration: a local
-file, Google Secret Manager, AWS Secrets Manager, or secrets the platform mounts as files. Values, and the tokens and
-keys that grant access to them, are held in guarded memory off the Java heap, over TLS too, wiped when no longer
-needed, and never appear in exception messages. Every path is proven by heap-dump tests. Java 25 or later, on Linux
-or macOS, on the module path or the class path.
+Secrets that never touch the Java heap. One API reads and writes secrets in Google Secret Manager, AWS Secrets
+Manager, files the platform mounts, or a local file. Values and the credentials that grant access to them are held in
+guarded native memory, sent over TLS through the system's OpenSSL, and wiped when you are done.
 
-No third-party dependency: no cloud SDK, no gRPC, no Netty, no Jackson. TLS, HTTP/1.1, JSON, Base64, SigV4 and the
-OAuth and metadata calls are the library's own code, on the JDK and the system's OpenSSL 3. At runtime an
-application gets the API, the providers it uses, and Descoped's 9 KB
-[service-provider-api](https://github.com/descoped/service-provider-api).
+- **One API, any backend.** The provider is chosen by configuration; the same code runs on a laptop and in production.
+- **Off the heap.** Locked, guarded pages that are closed outside a callback and left out of swap and core dumps.
+- **No third-party dependencies.** No cloud SDK, gRPC, Netty or Jackson; the network stack is the library's own.
+- **Proven.** Every read, write and credential path has a test that dumps the heap and finds no copy of the secret.
 
-**[Documentation](https://ssc.descoped.io)** (the same pages are in [docs/](docs/README.md)): getting started, the
-API, the architecture, the protocols, the topology, the deployment models, the sequence flows,
-[the security model](docs/security.md), each provider, and migrating from earlier versions.
+**Documentation: [ssc.descoped.io](https://ssc.descoped.io)** (also in [docs/](docs/README.md)).
 
-Changes by version are in the [changelog](CHANGELOG.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+## Requirements
 
-## How it works
+- Java 25 or later, on Linux or macOS (x86_64 or aarch64)
+- The JVM flag `--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path)
+- OpenSSL 3 for the Google and AWS providers (`libssl3` on Debian and Ubuntu, `brew install openssl@3` on macOS)
 
-An application compiles against `secrets-client-api` and creates a client from a configuration map:
+## Getting started
+
+Add the API, and the provider you use at runtime:
+
+```xml
+<dependency>
+    <groupId>io.descoped.secrets</groupId>
+    <artifactId>secrets-client-api</artifactId>
+    <version>4.0.0-SNAPSHOT</version>
+</dependency>
+<dependency>
+    <groupId>io.descoped.secrets</groupId>
+    <artifactId>secrets-provider-google-secret-manager</artifactId>
+    <version>4.0.0-SNAPSHOT</version>
+    <scope>runtime</scope>
+</dependency>
+```
+
+4.0 is published as a SNAPSHOT from `https://maven.descoped.io/`; 3.0.0 on Maven Central has the earlier API.
+[Getting started](docs/getting-started.md) has the repository and the BOM.
+
+Read a secret:
 
 ```java
 try (SecretManagerClient client = SecretManagerClient.create(Map.of(
         "secrets.provider", "google-secret-manager",
         "secrets.project-id", "my-project"));
      Secret password = client.read("db-password")) {
-    password.withChars(chars -> {                    // a heap copy, wiped when the call returns
+    password.withChars(chars -> {                    // a heap copy, zeroed when the call returns
         connect(chars);
         return null;
     });
 }
 ```
 
-`secrets.provider` names the provider, which is found with `ServiceLoader` among the provider modules on the module
-path or class path. Every provider follows the same contract, so moving from a local file in development to Google
-Secret Manager or AWS Secrets Manager in production is a configuration change. The JVM needs
-`--enable-native-access=io.descoped.secrets.api` (`ALL-UNNAMED` on the class path) for guarded memory, and the
-network providers need the system's OpenSSL 3.
-
-## Working with the code
-
-One Maven reactor; every module shares the version of the root POM.
-
-```
-secrets-client-api/                        the API and the provider service
-secrets-provider-safe-configuration/       provider: a local key=value file, for development and tests
-secrets-provider-google-secret-manager/    provider: Google Secret Manager (REST API)
-secrets-provider-mounted/                  provider: secrets the platform mounts as files, read-only
-secrets-provider-aws-secrets-manager/      provider: AWS Secrets Manager (JSON API, signed with SigV4)
-secrets-client-bom/                        BOM of the modules above
-secrets-test-support/                      test support: the canary heap-dump harness (never published)
-src/it/consumer/                           JPMS smoke test: an application using every provider
-docs/                                      user documentation, published by the site
-site/                                      the documentation site (krantho, static), https://ssc.descoped.io
-```
-
-Requires JDK 25 or later; the Maven Wrapper brings Maven. The [`justfile`](justfile) holds the regular tasks
-([just](https://just.systems)); `just` lists them:
+Run with native access:
 
 ```sh
-just build                       # compile with -Xlint:all -Werror, run the tests (JUnit 6)
-just check                       # what CI checks: build, Javadoc with doclint, the JPMS smoke test
-just test <module> [pattern]     # one module, optionally some tests
-just coverage [module]           # JaCoCo report per module in <module>/target/site/jacoco
-just linux                       # the tests on Linux in Docker, where memfd_secret is in use
+java --enable-native-access=io.descoped.secrets.api -m my.app/my.app.Main
 ```
 
-Without just, the same with Maven: `./mvnw verify`, `./mvnw verify javadoc:javadoc`, `src/it/consumer/run.sh`,
-`./mvnw verify -P coverage`.
+## Providers
 
-- Each module's tests are a separate named module (`src/test/java/module-info.java`) and reach the providers only
-  through `SecretManagerClient.create`, as an application does.
-- Every path that reads or writes a secret has a canary test: a child JVM handles a random canary through that
-  path and dumps its heap, which must hold no copy of it in any encoding.
-- The Google provider's tests run against `FakeGoogle`, and the AWS provider's against `FakeAws`, local fakes of the
-  APIs and of the credential endpoints. The live tests (`just live-google`, `just live-aws`) run against real
-  accounts only when their variables are set, never in CI.
-- Pull requests run CI (build, tests, Javadoc, smoke test) and an automated review; SonarCloud analyses pushes and
-  pull requests from this repository, without gating the build. A change to `docs/` or `site/` on `master` publishes
-  the site (`.github/workflows/pages.yml`); `cd site && pnpm install && pnpm dev` shows it locally.
-- Releases are published to Maven Central by hand ([RELEASING.md](RELEASING.md)). SNAPSHOTs of `master`, and of a
-  branch when run by hand (`X.Y.Z-<branch>-SNAPSHOT`), are published by CI to `https://maven.descoped.io/`, never to
-  Maven Central (see [getting started](docs/getting-started.md)).
+| Provider | `secrets.provider` | Reads | Writes |
+|---|---|---|---|
+| [Google Secret Manager](docs/providers/google-secret-manager.md) | `google-secret-manager` | yes | yes |
+| [AWS Secrets Manager](docs/providers/aws-secrets-manager.md) | `aws-secrets-manager` | yes | yes |
+| [Mounted files](docs/providers/mounted.md) (Kubernetes, Cloud Run) | `mounted` | yes | no |
+| [Local file](docs/providers/safe-configuration.md) (development and tests) | `safe-configuration` | yes | yes |
+
+## Build and test
+
+Requires JDK 25; the Maven Wrapper brings Maven. The [`justfile`](justfile) holds the regular tasks
+([just](https://just.systems)):
+
+```sh
+just build                       # compile with -Xlint:all -Werror, run every test
+just check                       # what CI runs: build, Javadoc, the JPMS smoke test
+just test <module> [pattern]     # one module, optionally some tests
+just linux                       # the tests on Linux in Docker, where memfd_secret is in use
+just coverage [module]           # JaCoCo reports
+```
+
+Without just: `./mvnw verify`, `./mvnw verify javadoc:javadoc`, `src/it/consumer/run.sh`.
+
+The Google and AWS providers are tested against local fakes of their APIs and credential endpoints. The live tests
+run against real accounts only when their variables are set: `just live-google`, `just live-aws`.
+
+## Project layout
+
+```
+secrets-client-api/                       the API, guarded memory, and the network stack
+secrets-provider-google-secret-manager/   Google Secret Manager
+secrets-provider-aws-secrets-manager/     AWS Secrets Manager
+secrets-provider-mounted/                 mounted files, read-only
+secrets-provider-safe-configuration/      a local key=value file
+secrets-client-bom/                       the BOM
+secrets-test-support/                     the heap-dump test harness (not published)
+src/it/consumer/                          JPMS smoke test
+docs/                                     documentation, published at ssc.descoped.io
+site/                                     the documentation site
+```
+
+## Contributing
+
+Pull requests run CI and an automated review. [CHANGELOG.md](CHANGELOG.md) lists the changes by version, and
+[RELEASING.md](RELEASING.md) describes how a version is released.
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md). What the library protects, and where that ends, is in
+[the security model](docs/security.md).
 
 ## License
 
