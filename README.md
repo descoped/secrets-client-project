@@ -39,8 +39,20 @@ Add the API, and the provider you use at runtime:
 </dependency>
 ```
 
-4.0 is published as a SNAPSHOT from `https://maven.descoped.io/`; 3.0.0 on Maven Central has the earlier API.
-[Getting started](docs/getting-started.md) has the repository and the BOM.
+Releases are on Maven Central; 3.0.0 there has the earlier API. 4.0 is published as `4.0.0-SNAPSHOT`.
+SNAPSHOTs are never on Maven Central. CI publishes them to `https://maven.descoped.io/`: `X.Y.Z-SNAPSHOT` from
+`master`, and `X.Y.Z-<branch>-SNAPSHOT` from a branch when run by hand. To use one, add the repository:
+
+```xml
+<repository>
+    <id>descoped-snapshots-public</id>
+    <url>https://maven.descoped.io/</url>
+    <releases><enabled>false</enabled></releases>
+    <snapshots><enabled>true</enabled></snapshots>
+</repository>
+```
+
+[Getting started](docs/getting-started.md) has the BOM, which aligns the versions of every module.
 
 Read a secret:
 
