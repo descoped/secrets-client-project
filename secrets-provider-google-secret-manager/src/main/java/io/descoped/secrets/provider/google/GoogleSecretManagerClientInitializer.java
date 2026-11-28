@@ -187,14 +187,22 @@ public final class GoogleSecretManagerClientInitializer implements SecretManager
         }
     }
 
-    /** The client on {@code memory}, which is closed if the client cannot be created. */
+    /**
+     * The client on {@code memory}, which owns the access tokens from then on. If the client cannot be created, the
+     * tokens and the memory are closed.
+     */
     private static GoogleSecretManagerClient client(SecretMemory memory,
                                                     Function<SecretMemory, AccessTokens.Source> source,
                                                     Http.Target api, String projectId, List<String> locations,
                                                     Http.Timeouts timeouts, TlsContext tls) {
         try {
-            return new GoogleSecretManagerClient(api, projectId, locations, timeouts, memory,
-                    new AccessTokens(source.apply(memory)), tls);
+            AccessTokens tokens = new AccessTokens(source.apply(memory));
+            try {
+                return new GoogleSecretManagerClient(api, projectId, locations, timeouts, memory, tokens, tls);
+            } catch (RuntimeException e) {
+                tokens.close();
+                throw e;
+            }
         } catch (RuntimeException e) {
             memory.close();
             throw e;
