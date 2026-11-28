@@ -9,7 +9,7 @@ Manager, files the platform mounts, or a local file. Values and the credentials 
 guarded native memory, sent over TLS through the system's OpenSSL, and wiped when you are done.
 
 - **One API, any backend.** The provider is chosen by configuration; the same code runs on a laptop and in production.
-- **Off the heap.** Locked, guarded pages that are closed outside a callback, never swapped, and on Linux out of core dumps.
+- **Off the heap.** Guarded pages, closed outside a callback, never swapped, and on Linux out of core dumps.
 - **No third-party dependencies.** No cloud SDK, gRPC, Netty or Jackson; the network stack is the library's own.
 - **Proven.** Every read, write and credential path has a test that dumps the heap and finds no copy of the secret.
 
