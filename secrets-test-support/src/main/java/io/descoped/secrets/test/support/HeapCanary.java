@@ -167,7 +167,8 @@ public final class HeapCanary {
         // The coverage profile's JaCoCo agent, so that what runs in the child counts too. Only that one: an IDE's
         // agents (IntelliJ's debugger agent) read settings files that are gone by the time the child starts.
         ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
-                .filter(argument -> argument.startsWith("-javaagent:") && argument.contains("jacoco"))
+                .filter(argument -> argument.startsWith("-javaagent:")
+                        && argument.substring("-javaagent:".length()).split("=", 2)[0].contains("jacoco"))
                 .forEach(command::add);
         command.addAll(List.of(
                 "--enable-native-access=io.descoped.secrets.api",

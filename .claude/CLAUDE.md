@@ -88,8 +88,8 @@ change to the API or to a provider's documented behaviour needs a new major vers
   `SecretManagerClient.create` and `ServiceLoader`, as an application does (the API module's `uses` resolves the
   provider module). A provider's test module also `requires` the provider, which exports nothing: IntelliJ puts on
   the module path only what the test module reaches, and a provider on the class path cannot use the API's qualified
-  exports. The tests must pass in IntelliJ as well as in Maven. Never put tests in a module's own package (a split package) or test providers in
-  `META-INF/services` (a named module ignores it).
+  exports. The tests must pass in IntelliJ as well as in Maven. Never put tests in a module's own package (a split
+  package) or test providers in `META-INF/services` (a named module ignores it).
 
 ## Maven Wrapper
 
