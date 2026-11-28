@@ -86,7 +86,9 @@ change to the API or to a provider's documented behaviour needs a new major vers
 - Each module's tests are a named module of their own, `<module>.test` (`src/test/java/module-info.java`), in package
   `<package>.test`. They require `io.descoped.secrets.api` and reach a provider only through
   `SecretManagerClient.create` and `ServiceLoader`, as an application does (the API module's `uses` resolves the
-  provider module). Never put tests in a module's own package (a split package) or test providers in
+  provider module). A provider's test module also `requires` the provider, which exports nothing: IntelliJ puts on
+  the module path only what the test module reaches, and a provider on the class path cannot use the API's qualified
+  exports. The tests must pass in IntelliJ as well as in Maven. Never put tests in a module's own package (a split package) or test providers in
   `META-INF/services` (a named module ignores it).
 
 ## Maven Wrapper

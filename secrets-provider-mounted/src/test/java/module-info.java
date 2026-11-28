@@ -5,6 +5,9 @@
  */
 open module io.descoped.secrets.provider.mounted.test {
     requires io.descoped.secrets.api;
+    // Exports nothing, and the tests still reach it only through ServiceLoader: required so that an IDE, which puts on
+    // the module path only what this module reaches, runs the provider as a named module, as Maven does.
+    requires io.descoped.secrets.provider.mounted;
     requires io.descoped.secrets.test.support;
     requires org.junit.jupiter.api;
     requires org.junit.jupiter.params;
